@@ -1,0 +1,33 @@
+# Author: TAI <tai.dev@hotmail.com>
+name: serializable
+description: >-
+  A powerful, zero-code-generation serialization engine for Dart & Flutter. 
+  Declarative JSON mapping, type safety, and immutable models without build_runner.
+version: 0.2.0
+repository: https://github.com/Daskerwow/serializable
+
+environment:
+  sdk: ">=3.10.3 <4.0.0"
+
+dependencies:
+  equatable: ^2.0.5
+
+dev_dependencies:
+  lints: ^3.0.0
+  test: ^1.24.0
+
+platforms:
+  android:
+  ios:
+  linux:
+  macos:
+  web:
+  windows:
+
+topics:
+  - serialization
+  - json
+  - models
+  - flutter
+  - no-code-generation
+  - dart
