@@ -1,6 +1,6 @@
 // ignore_for_file: avoid_print
 import 'package:equatable/equatable.dart';
-import 'package:json_forge/serializable.dart';
+import 'package:json_forge/json_forge.dart';
 
 enum DeviceStatus { active, maintenance, offline, unknown }
 
