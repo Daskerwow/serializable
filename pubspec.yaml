@@ -1,5 +1,4 @@
-# Author: TAI <tai.dev@hotmail.com>
-name: serializable
+name: json_forge
 description: >-
   A powerful, zero-code-generation serialization engine for Dart & Flutter. 
   Declarative JSON mapping, type safety, and immutable models without build_runner.

@@ -1,4 +1,4 @@
-import 'package:serializable/serializable.dart';
+import 'package:json_forge/serializable.dart';
 import 'package:equatable/equatable.dart';
 import 'package:test/test.dart';
 

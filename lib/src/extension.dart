@@ -29,8 +29,8 @@
 //      logic is centralized in SerializableHelpers.fromJson.
 // =============================================================================
 
-import 'package:serializable/src/errors.dart';
-import 'package:serializable/src/types/parser.dart';
+import 'package:json_forge/src/errors.dart';
+import 'package:json_forge/src/types/parser.dart';
 
 import 'serializable_model.dart';
 import 'types/field.dart';
