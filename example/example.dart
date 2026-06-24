@@ -121,13 +121,18 @@ void main() {
   final u = t.copyWith(
     ($) => [$.title.set('ZONE_B'), $.status.set(DeviceStatus.maintenance)],
   );
+
   print('updated: ${u.title} / ${u.status}, id same: ${u.id == t.id}');
 
   final s2 = t.sensors.first.copyWith(($) => [$.value.set(99.9)]);
+
   print(
     'sensor value: ${s2.value}, uid same: ${s2.uid == t.sensors.first.uid}',
   );
 
   print('round-trip: ${t == Terminal.fromJson(raw)}');
   print('changed: ${t == u}');
+
+  // The toJson() method is implemented automatically without code generation!
+  print(s2.toJson());
 }
