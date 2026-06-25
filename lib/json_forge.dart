@@ -1,27 +1,37 @@
-/// A powerful, zero-code-generation serialization engine for Dart & Flutter.
+/// A zero-code-generation, declarative JSON (de)serialization engine for
+/// Dart & Flutter.
 ///
-/// This library provides a declarative approach to model serialization and deserialization
-/// without requiring code generation tools like build_runner. It offers type safety,
-/// automatic type conversion, and immutable copyWith functionality.
+/// This library provides a declarative approach to model serialization and
+/// deserialization without requiring code-generation tools like
+/// `build_runner`. It offers type safety, automatic type conversion, and
+/// immutable `copyWith`.
 ///
-/// The library consists of two main components:
-/// - [Field]: A descriptor that maps between JSON keys and Dart class properties
-/// - [Serializable]: A mixin that provides automatic toJson() and props implementations
-/// - [SerializableModelI]: An interface that all serializable models must implement
-/// - [SerializableHelpers]: Core engine with fromJson and copyWith implementations
+/// ### Main components
+/// - [Field] — a descriptor binding a JSON key to a Dart class property.
+/// - [FieldSet] — the typed schema of fields for a model.
+/// - [ModelType] / [ModelBinder] — bind a [FieldSet] to a constructor; the
+///   engine behind `fromJson` and `copyWith`.
+/// - [Serializable] — a mixin providing automatic `toJson()` and `props`.
+/// - [SerializableModelI] — the interface every serializable model implements.
+/// - [SerializableHelpers] — the low-level engine `fromJson`/`copyWith` build on.
+/// - [SerializationError] / [RequiredFieldError] / [TypeConversionError] —
+///   the typed error hierarchy raised during deserialization.
 ///
-/// Key features:
-/// - Zero code generation (no .g.dart files)
-/// - Declarative field definitions
-/// - Type safety with smart type conversion
-/// - Powerful copyWith with undefined marker support
-/// - Integration with Equatable for object comparison
-/// - Recursive handling of nested models, lists, and maps
-library serializable;
+/// ### Highlights
+/// - Zero code generation — no `.g.dart` files.
+/// - Declarative field definitions, with smart default parsers for
+///   primitive types.
+/// - Type-safe `copyWith`, with two schema-declaration styles (named
+///   properties or a concise list literal — see [FieldSet]).
+/// - Integrates with `Equatable` for value equality.
+/// - Recursive handling of nested models, lists, sets, and maps.
+library;
 
 export 'src/serializable_model.dart';
 export 'src/extension.dart';
+export 'src/errors.dart';
+export 'src/types/types.dart';
+export 'src/types/field.dart';
+export 'src/types/field_patch.dart';
 export 'src/types/model_type.dart';
 export 'src/types/parser.dart';
-export 'src/types/field.dart';
-export 'src/types/types.dart';

@@ -6,10 +6,6 @@ enum DeviceStatus { active, maintenance, offline, unknown }
 
 enum AccessLevel { read, write, execute }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Sensor
-// ══════════════════════════════════════════════════════════════════════════════
-
 class Sensor extends Equatable with Serializable<Sensor> {
   const Sensor(this.uid, this.value, this.history);
 
@@ -17,33 +13,31 @@ class Sensor extends Equatable with Serializable<Sensor> {
   final double value;
   final List<DateTime> history;
 
-  // M is always explicit — Dart cannot infer it from a positional constructor.
-  static final $ = ModelType<Sensor, SensorFields>(Sensor.new, SensorFields());
+  static final $ = ModelType<Sensor>(Sensor.new, [
+    'sensor_uid'.field<Sensor, String>((m) => m.uid),
+    'last_value'.field((m) => m.value, parser: doubleOrZero),
+    'history_logs'.field((m) => m.history, parser: listOf(dateTimeOrEpoch)),
+  ]);
 
   @override
-  List<FieldOf<Sensor>> get fields => $.fields.all;
-
+  ListFieldOf<Sensor> get fields => $.all;
   static Sensor fromJson(Json json) => $.call(json);
-
-  Sensor copyWith(Iterable<FieldPatch> Function(SensorFields $) updates) =>
-      $.bind(this)(updates);
-}
-
-final class SensorFields extends FieldSet<Sensor> {
-  final uid = 'sensor_uid'.field<Sensor, String>((m) => m.uid);
-  final value = 'last_value'.field<Sensor, double>((m) => m.value);
-  final history = 'history_logs'.field<Sensor, List<DateTime>>(
-    (m) => m.history,
-    parser: listOf(dateTimeOrEpoch),
-  );
-
-  @override
-  late final all = <FieldOf<Sensor>>[uid, value, history];
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Terminal
+// Terminal — same idea, with an enum, a nested model list, and a Map field.
+// Notice `name`/`jsonKey` decoupling falls out for free here: the Record's
+// field is called `title`, the wire key is `display_name` — nothing extra
+// needed to keep `copyWith` call sites independent of the JSON shape.
 // ══════════════════════════════════════════════════════════════════════════════
+
+typedef TerminalFields = (
+  Field<Terminal, int> id,
+  Field<Terminal, String> title,
+  Field<Terminal, DeviceStatus> status,
+  Field<Terminal, List<Sensor>> sensors,
+  Field<Terminal, Map<AccessLevel, String>> tokens,
+);
 
 class Terminal extends Equatable with Serializable<Terminal> {
   const Terminal(this.id, this.title, this.status, this.sensors, this.tokens);
@@ -54,46 +48,40 @@ class Terminal extends Equatable with Serializable<Terminal> {
   final List<Sensor> sensors;
   final Map<AccessLevel, String> tokens;
 
-  static final $ = ModelType<Terminal, TerminalFields>(
-    Terminal.new,
-    TerminalFields(),
+  static final TerminalFields _fields = (
+    't_id'.field((m) => m.id, parser: intOrZero),
+    'display_name'.field((m) => m.title, parser: stringOrDefault('Unnamed')),
+    'device_status'.field(
+      (m) => m.status,
+      parser: enumOrFirst(DeviceStatus.values),
+      serializer: enumToJson,
+    ),
+    'attached_sensors'.field(
+      (m) => m.sensors,
+      parser: listOf(modelOf(Sensor.fromJson)),
+    ),
+    'access_keys'.field(
+      (m) => m.tokens,
+      parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
+      serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
+    ),
   );
 
+  static final $ = ModelType<Terminal>(Terminal.new, [
+    _fields.$1,
+    _fields.$2,
+    _fields.$3,
+    _fields.$4,
+    _fields.$5,
+  ]);
+
   @override
-  List<FieldOf<Terminal>> get fields => $.fields.all;
+  ListFieldOf<Terminal> get fields => $.all;
 
   static Terminal fromJson(Json json) => $.call(json);
 
-  Terminal copyWith(Iterable<FieldPatch> Function(TerminalFields $) updates) =>
-      $.bind(this)(updates);
-}
-
-final class TerminalFields extends FieldSet<Terminal> {
-  final id = 't_id'.field<Terminal, int>((m) => m.id, parser: intOrZero);
-  final title = 'display_name'.field<Terminal, String>(
-    (m) => m.title,
-    parser: (v) {
-      final s = stringOrEmpty(v);
-      return s.isNotEmpty ? s : 'Unnamed';
-    },
-  );
-  final status = 'device_status'.field<Terminal, DeviceStatus>(
-    (m) => m.status,
-    parser: enumOrDefault(DeviceStatus.values),
-    serializer: enumToJson,
-  );
-  final sensors = 'attached_sensors'.field<Terminal, List<Sensor>>(
-    (m) => m.sensors,
-    parser: listOf(modelOf(Sensor.fromJson)),
-  );
-  final tokens = 'access_keys'.field<Terminal, Map<AccessLevel, String>>(
-    (m) => m.tokens,
-    parser: mapOf(enumOrDefault(AccessLevel.values), stringOrEmpty),
-    serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
-  );
-
-  @override
-  late final all = <FieldOf<Terminal>>[id, title, status, sensors, tokens];
+  Terminal copyWith(FieldsBuilder<TerminalFields> builder) =>
+      $.bind(this, _fields)(builder);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -118,21 +106,23 @@ void main() {
   final t = Terminal.fromJson(raw);
   print('id: ${t.id}, title: ${t.title}, status: ${t.status}');
 
+  // $.title / $.status are native Record field accesses — no string keys,
+  // no custom lookup operator, nothing to misspell without the analyzer
+  // catching it immediately.
   final u = t.copyWith(
-    ($) => [$.title.set('ZONE_B'), $.status.set(DeviceStatus.maintenance)],
+    ($) => [$.$2.set('ZONE_B'), $.$3.set(DeviceStatus.maintenance)],
   );
-
   print('updated: ${u.title} / ${u.status}, id same: ${u.id == t.id}');
 
-  final s2 = t.sensors.first.copyWith(($) => [$.value.set(99.9)]);
-
+  final s2 = t.sensors.first;
   print(
     'sensor value: ${s2.value}, uid same: ${s2.uid == t.sensors.first.uid}',
   );
+  print(s2.toJson());
 
   print('round-trip: ${t == Terminal.fromJson(raw)}');
   print('changed: ${t == u}');
 
-  // The toJson() method is implemented automatically without code generation!
-  print(s2.toJson());
+  // toJson() is fully automatic — no code generation involved.
+  print(t.toJson());
 }

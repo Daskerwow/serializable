@@ -6,23 +6,23 @@
 // Hierarchy:
 //   Error
 //   └── SerializationError          ← base class for all serialization errors
-//         ├── RequiredFieldError    ← field is required, but turned out to be null/missing
-//         └── TypeConversionError  ← value is present, but the type does not match
+//         ├── RequiredFieldError    ← field is required, but turned out null/missing
+//         └── TypeConversionError   ← value is present, but the type doesn't match
 //
 // Principles:
 //   • All fields are final (immutable after creation).
-//   • toString() returns a human-readable multi-line output.
-//   • Subclasses extend toString() with their fields via super.
+//   • toString() returns human-readable, multi-line output.
+//   • Subclasses extend toString() with their own fields via super.
 // =============================================================================
 
-/// Base typed error that occurs during JSON deserialization.
+/// Base typed error raised during JSON deserialization.
 ///
 /// Carries structured context:
-///   - which model is being deserialized,
+///   - which model was being deserialized,
 ///   - which field caused the error,
-///   - full path in JSON (dot-separated),
-///   - raw value from JSON,
-///   - original exception (if any).
+///   - the full path in the JSON (dot-separated),
+///   - the raw value from JSON,
+///   - the original exception, if any.
 ///
 /// Example output:
 /// ```
@@ -48,16 +48,16 @@ final class SerializationError extends Error {
   final String fieldName;
 
   /// Full dot-separated path to the field (e.g., `"terminal_users.0.t_id"`).
-  /// Includes all nesting levels via `at(...)`.
+  /// Includes every nesting level introduced via `at(...)`.
   final String path;
 
-  /// Raw JSON value that caused the error (can be null).
+  /// Raw JSON value that caused the error (may be `null`).
   final Object? rawValue;
 
-  /// Original exception, if the error was provoked by another exception.
+  /// The original exception, if this error was provoked by another one.
   final Object? cause;
 
-  /// Optional human-readable error message.
+  /// Optional human-readable message.
   final String? message;
 
   @override
@@ -75,7 +75,7 @@ final class SerializationError extends Error {
 
 // =============================================================================
 
-/// Thrown when a required field is missing in JSON or is null.
+/// Thrown when a required field is missing from the JSON, or is `null`.
 ///
 /// Example output:
 /// ```
@@ -94,12 +94,12 @@ final class RequiredFieldError extends SerializationError {
 
 // =============================================================================
 
-/// Thrown when a value is present, but cannot be cast
-/// to the expected type.
+/// Thrown when a value is present, but can't be converted to the expected
+/// type.
 ///
-/// Additionally stores:
+/// Additionally carries:
 ///   - [expectedType] — the type that was expected,
-///   - [actualType]   — the type that was received.
+///   - [actualType]   — the type that was actually received.
 ///
 /// Example output:
 /// ```
@@ -121,15 +121,14 @@ final class TypeConversionError extends SerializationError {
     super.cause,
   }) : super(message: 'expected $expectedType, got $actualType');
 
-  /// The type that the parser expected.
+  /// The type the parser expected.
   final Type expectedType;
 
-  /// The actual type of the value received from JSON.
+  /// The actual runtime type of the value received from JSON.
   final Type actualType;
 
   @override
   String toString() {
-    // Extend the base output with information about the expected and actual types.
     final base = super.toString();
     return '$base\n'
         '  expected : $expectedType\n'

@@ -1,25 +1,8 @@
 // =============================================================================
 // serializable_model.dart
 //
-// Serialization core: model interface, Serializable mixin, and
-// SerializableHelpers engine.
-//
-// ─── Fixed Issues ────────────────────────────────────────────────────
-//
-//   1. Centralized null-check for required fields.
-//      Previously, RequiredFieldError was duplicated: in extension.dart AND in fromJson.
-//      Now the null-guard lives only in fromJson — a single source of truth.
-//
-//   2. Function.apply — positional call (documentation fixed).
-//      The old comment claimed "named dispatch" and "positional: false",
-//      although Function.apply(factory, args) is ALWAYS a positional call.
-//      Named-dispatch requires Function.apply(factory, null, namedArgsMap).
-//      The documentation has been aligned with the actual behavior.
-//
-//   3. _serialize: DateTime is now converted via toIso8601String(),
-//      which is compatible with dateTimeOrNull (accepts ISO strings).
-//      The contract "whatever _serialize wrote, the parser will read back" is now
-//      explicitly documented.
+// Serialization core: the model interface, the Serializable mixin, and the
+// SerializableHelpers engine (fromJson / toJson / copyWith).
 // =============================================================================
 
 import 'package:equatable/equatable.dart';
@@ -31,21 +14,27 @@ import 'types/types.dart';
 // Sentinel — marker for "value not passed"
 // =============================================================================
 
-/// Marker indicating "parameter not passed — keep the original value".
+/// Marker meaning "this parameter wasn't passed — keep the original value".
 ///
 /// Conceptually different from `null`:
 /// ```dart
-/// user.copyWith(address: null)   // explicitly sets address to null
-/// user.copyWith(name: 'Bob')     // address remains the same
+/// SerializableHelpers.copyWith(user, {'address': null}, User.new);  // clears address
+/// SerializableHelpers.copyWith(user, {'name': 'Bob'}, User.new);    // address untouched
 /// ```
 ///
-/// Used only in copyWith signatures. Check via [identical]:
+/// Used by the low-level, Map-based `SerializableHelpers.copyWith`. Check
+/// with [identical]:
 /// ```dart
-/// if (!identical(value, undefined)) { /* value was passed */ }
+/// if (!identical(value, undefined)) { /* value was actually passed */ }
 /// ```
+///
+/// If your model uses [ModelType]/[ModelBinder] for `copyWith` (the
+/// recommended setup), you won't need this: `copyWith(($) => [...])` only
+/// ever touches the fields you explicitly `.set(...)`.
 const Object undefined = _Undefined();
 
-/// Internal singleton class for the marker. Private — cannot be instantiated outside.
+/// Internal singleton backing [undefined]. Private — can't be instantiated
+/// from outside this library.
 final class _Undefined {
   const _Undefined();
 
@@ -54,69 +43,78 @@ final class _Undefined {
 }
 
 // =============================================================================
-// SerializableModelI — model interface
+// SerializableModelI — the model contract
 // =============================================================================
 
-/// Contract that every serializable model must implement.
+/// The contract every serializable model must implement.
 ///
-/// Use the [Serializable] mixin for automatic implementation of [toJson] and [props].
+/// Use the [Serializable] mixin for an automatic [toJson] and [props].
 ///
-/// ### Field Requirements ([fields])
-/// The [fields] list must contain descriptors for ALL model fields
-/// in the same order as the constructor parameters. This is critical: [SerializableHelpers.fromJson]
-/// passes values as positional arguments via [Function.apply].
+/// ### [fields]
+/// Must list a descriptor for *every* model field, in the same order as the
+/// constructor parameters. This is load-bearing:
+/// `SerializableHelpers.fromJson` passes parsed values as positional
+/// arguments via `Function.apply`.
 abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
-  /// All field descriptors in the order of constructor parameters.
+  /// All field descriptors, in constructor-parameter order.
   ///
-  /// Declare as `static final` and override via a getter:
+  /// Typically backed by a `static final` [ModelType]:
   /// ```dart
-  /// static final _fields = [...];
-  /// @override List<Field<User, Object?>> get fields => _fields;
+  /// static final $ = ModelType<User>(User.new, [...]);
+  /// @override
+  /// ListFieldOf<User> get fields => $.all;
   /// ```
   ListFieldOf<M> get fields;
 
-  /// Serializes the instance into a JSON-compatible Map.
+  /// Serializes this instance into a JSON-compatible [Map].
   Json toJson();
 
-  /// Field values in the order of declaration — used by [Equatable].
+  /// Field values in declaration order — feeds [Equatable.props].
   Props get props;
 }
 
 // =============================================================================
-// Serializable — mixin with automatic implementation
+// Serializable — mixin with automatic toJson / props
 // =============================================================================
 
-/// Provides automatic implementations of [toJson] and [props] via [fields].
+/// Supplies automatic [toJson] and [props] implementations, derived from
+/// [SerializableModelI.fields].
 ///
-/// ### Full Model Example
+/// ### A complete model, end to end
 /// ```dart
-/// class User extends Equatable with Serializable<User> {
-///   final int    id;
-///   final String name;
-///   final String? address;
+/// class Sensor extends Equatable with Serializable<Sensor> {
+///   const Sensor(this.uid, this.value);
 ///
-///   const User(this.id, this.name, this.address);
+///   final String uid;
+///   final double value;
 ///
-///   static final _fields = <Field<User, Object?>>[
-///     'id'     .field((m) => m.id,      parser: intOrZero),
-///     'name'   .field((m) => m.name),
-///     'address'.field((m) => m.address, nullable: true),
-///   ];
+///   // A named Record, listing each field by its Dart-facing name — this
+///   // is what lets `copyWith` read `$.value.set(...)` with no string keys
+///   // and no reflection. See `ModelType.bind`'s doc comment for why.
+///   static final _fields = (
+///     uid: 'sensor_uid'.field<Sensor, String>((m) => m.uid),
+///     value: 'last_value'.field<Sensor, double>((m) => m.value, parser: doubleOrZero),
+///   );
+///
+///   // M is explicit — Dart can't infer it from a positional constructor.
+///   // The order here is what `Function.apply` uses — it must match the
+///   // constructor parameter order above.
+///   static final $ = ModelType<Sensor>(Sensor.new, [_fields.uid, _fields.value]);
 ///
 ///   @override
-///   List<Field<User, Object?>> get fields => _fields;
+///   ListFieldOf<Sensor> get fields => $.all;
 ///
-///   static User fromJson(Map<String, Object?> json) =>
-///       SerializableHelpers.fromJson(json, _fields, User.new);
+///   factory Sensor.fromJson(Json json) => $.call(json);
 ///
-///   User copyWith({Object? id = undefined, Object? name = undefined, Object? address = undefined}) =>
-///       SerializableHelpers.copyWith(
-///         this,
-///         {'id': id, 'name': name, 'address': address},
-///         User.new,
-///       );
+///   late final copyWith = $.bind(this, _fields);
 /// }
+///
+/// // sensor.copyWith(($) => [$.value.set(99.9)]);
 /// ```
+///
+/// Don't need type-safe `copyWith` for a particular model? Skip the Record
+/// entirely and feed `ModelType` a plain list literal — see `ModelType`'s
+/// own doc comment for that minimal shape.
 mixin Serializable<M extends SerializableModelI<M>> on Equatable
     implements SerializableModelI<M> {
   @override
@@ -127,13 +125,13 @@ mixin Serializable<M extends SerializableModelI<M>> on Equatable
 }
 
 // =============================================================================
-// SerializableHelpers — serialization engine
+// SerializableHelpers — the serialization engine
 // =============================================================================
 
-/// Static engine: deserialization, serialization, copyWith.
+/// Static engine behind deserialization, serialization, and `copyWith`.
 ///
-/// Not intended for direct inheritance. Use via the [Serializable] mixin
-/// and static methods [fromJson] / [copyWith].
+/// Not meant to be subclassed. Used via the [Serializable] mixin, and via
+/// `ModelType`/`ModelBinder` for the field-schema-driven workflow.
 final class SerializableHelpers {
   SerializableHelpers._();
 
@@ -144,22 +142,19 @@ final class SerializableHelpers {
   /// Deserializes [json] into model [R].
   ///
   /// ### Algorithm
-  /// 1. For each field from [fields]:
-  ///    a. Extracts the value by path `[nesting..., jsonKey]` via [_readPath].
-  ///    b. Applies `field.parser(raw)`.
-  ///    c. If the result is `null` and the field is not nullable — throws [RequiredFieldError].
-  /// 2. Passes all values as POSITIONAL arguments to [factory] via [Function.apply].
+  /// 1. For each field in [fields]:
+  ///    a. Reads the raw value at `[...nesting, jsonKey]` via [_readPath].
+  ///    b. Runs `field.parser(raw)`.
+  ///    c. If the result is `null` and the field isn't `Field.nullable` —
+  ///       throws [RequiredFieldError].
+  /// 2. Passes every value as a *positional* argument to [factory] via
+  ///    `Function.apply`.
   ///
-  /// ### Important: positional constructor call
-  /// [Function.apply(factory, args)] passes arguments positionally.
-  /// The order of fields in [fields] MUST match the order of constructor parameters.
-  /// Named-dispatch (Function.apply with namedArgs) is not used — it is slower
-  /// and breaks during obfuscation in `dart compile exe --obfuscate`.
-  ///
-  /// ```dart
-  /// static User fromJson(Map<String, Object?> json) =>
-  ///     SerializableHelpers.fromJson(json, _fields, User.new);
-  /// ```
+  /// ### Why positional
+  /// `Function.apply(factory, args)` is always a positional call. The order
+  /// of [fields] must match the constructor's parameter order exactly.
+  /// Named-argument dispatch isn't used — it's slower, and it breaks under
+  /// `dart compile exe --obfuscate`.
   static R fromJson<R extends SerializableModelI<R>>(
     Json json,
     ListFieldOf<R> fields,
@@ -168,18 +163,16 @@ final class SerializableHelpers {
     final args = <Object?>[];
 
     for (final f in fields) {
-      // Read the value by path (supports nested keys via at()).
       final raw = _readPath(json, f.nesting, f.jsonKey);
       Object? value;
 
       try {
         value = f.parser(raw);
       } on SerializationError {
-        // Typed errors are rethrown without wrapping — they already carry
-        // the full context (modelType, fieldName, path).
+        // Typed errors already carry full context — propagate as-is.
         rethrow;
       } catch (e, st) {
-        // Unexpected exceptions are wrapped in SerializationError with context.
+        // Anything else gets wrapped, with context attached.
         Error.throwWithStackTrace(
           SerializationError(
             modelType: R,
@@ -192,11 +185,9 @@ final class SerializableHelpers {
         );
       }
 
-      // ── Null guard (the only place where required fields are checked) ────────
-      //
-      // Cases:
+      // ── Null guard — the one place required fields are enforced ─────────
       //   value == null && !nullable → RequiredFieldError
-      //   value == null &&  nullable → acceptable, null is passed to the constructor
+      //   value == null &&  nullable → fine, null is passed to the constructor
       if (value == null && !f.nullable) {
         throw RequiredFieldError(
           modelType: R,
@@ -209,7 +200,6 @@ final class SerializableHelpers {
       args.add(value);
     }
 
-    // Call the constructor with positional arguments.
     try {
       return Function.apply(factory, args) as R;
     } catch (e, st) {
@@ -220,9 +210,9 @@ final class SerializableHelpers {
           path: R.toString(),
           cause: e,
           message:
-              'Позиционный вызов конструктора завершился ошибкой. '
-              'Убедись что поля в fields объявлены в том же порядке, '
-              'что и параметры конструктора.',
+              'Positional constructor call failed. Make sure the fields '
+              'passed to `ModelType` are declared in exactly the same '
+              'order as the constructor parameters of $R.',
         ),
         st,
       );
@@ -230,55 +220,50 @@ final class SerializableHelpers {
   }
 
   // ===========================================================================
-  // copyWith
+  // copyWith (low-level, Map-based)
   // ===========================================================================
 
   /// Creates a copy of [instance] with selectively replaced fields.
   ///
+  /// This is the low-level building block. If your model uses [ModelType]/
+  /// [ModelBinder] (the recommended setup), prefer the type-safe
+  /// `instance.copyWith(($) => [$.field.set(value)])` instead — it doesn't
+  /// need the [undefined] sentinel, and a misspelled field name is a
+  /// compile error rather than something you find at runtime.
+  ///
   /// ### Algorithm
   /// 1. Serializes [instance] via `toJson()`.
-  /// 2. For each [patch] entry with a value other than [undefined]:
-  ///    - Applies [_serialize] to the value (Dart object → JSON primitive).
-  ///    - Writes the result to JSON by `jsonKey`.
-  /// 3. Deserializes the updated JSON back into [R] via [fromJson].
+  /// 2. For each entry in [patch] whose value isn't [undefined]: serializes
+  ///    it via [_serialize] and writes it under that key.
+  /// 3. Deserializes the updated JSON back into [R] via [fromJson] — so
+  ///    every parser and required-field check runs again.
   ///
-  /// ### Serialization Contract
-  /// [_serialize] and parsers must be consistent:
-  ///   - DateTime → ISO-8601 string → dateTimeOrNull understands ISO-8601 ✓
-  ///   - Enum     → `.name`         → enumOrDefault compares by name ✓
-  ///   - Model    → `.toJson()`     → modelOf(fromJson) ✓
-  ///
-  /// ### Advantages over Symbol-based approach
-  /// - No Symbol — does not break with `--obfuscate`.
-  /// - No positional list — adding a field does not shift arguments.
-  /// - Order-independence — patch-Map is indexed by jsonKey.
+  /// ### Serialization contract
+  /// [_serialize] and the field parsers must agree on a wire format:
+  ///   - `DateTime` → ISO-8601 string → `dateTimeOrNull` reads ISO-8601 ✓
+  ///   - `Enum`     → `.name`         → `enumOrDefault` compares by name ✓
+  ///   - model      → `.toJson()`     → `modelOf(fromJson)` ✓
   ///
   /// ### Values in [patch]
-  /// | Value           | Effect                                          |
-  /// |-----------------|-------------------------------------------------|
-  /// | `undefined`     | field is not changed (original value)           |
-  /// | `null`          | field is set to null (only for nullable)        |
-  /// | any other       | field is overwritten by this value              |
+  /// | Value       | Effect                                    |
+  /// |-------------|---------------------------------------------|
+  /// | [undefined] | field is untouched                          |
+  /// | `null`      | field is set to `null` (only if nullable)   |
+  /// | anything    | field is overwritten with that value        |
   ///
-  /// Keys in [patch] are **jsonKey** (strings from JSON), not Dart names.
+  /// Keys in [patch] are JSON keys, not Dart property names.
   static R copyWith<R extends SerializableModelI<R>>(
     R instance,
     Json patch,
     Function factory,
   ) {
-    // Start with the current JSON state of the model.
     final json = instance.toJson();
 
     for (final entry in patch.entries) {
-      // undefined = "do not touch". Skip such entries.
       if (identical(entry.value, undefined)) continue;
-
-      // Serialize the Dart value into a JSON-compatible type.
-      // This ensures consistency with parsers during repeated fromJson.
       json[entry.key] = _serialize(entry.value);
     }
 
-    // Full deserialization — all parsers and type checks are executed.
     return fromJson<R>(json, instance.fields, factory);
   }
 
@@ -286,26 +271,21 @@ final class SerializableHelpers {
   // toJson (internal)
   // ===========================================================================
 
-  /// Builds a JSON-Map from the model fields.
+  /// Builds a JSON map from a model's fields.
   ///
-  /// For each field:
-  ///   - If there is a custom serializer → use it via the type-erased wrapper.
-  ///   - Otherwise → [_serialize] with default smart logic.
-  ///
-  /// Fields with nesting are written via [_writeDeep] — creates nested Maps on the fly.
+  /// Each field is serialized via its custom serializer (through the
+  /// type-erased wrapper) if it has one, or via [_serialize] otherwise.
+  /// Fields declared with nesting (via `at(...)`) are written through
+  /// [_writeDeep], which creates the intermediate maps on the fly.
   static Json _buildJson<M>(ListFieldOf<M> fields, M instance) {
     final result = <String, Object?>{};
 
     for (final f in fields) {
       final val = f.getter(instance);
-
       final serialized = f.hasSerializer
-          // Use the type-erased wrapper — safe with an erased type.
           ? f.serializeErased(val)
-          // Default smart serialization.
           : _serialize(val);
 
-      // Write by the full path (account for nesting via at()).
       _writeDeep(result, [...f.nesting, f.jsonKey], serialized);
     }
 
@@ -316,36 +296,32 @@ final class SerializableHelpers {
   // _serialize — smart recursive serializer
   // ===========================================================================
 
-  /// Recursively serializes a Dart value into a JSON-compatible type.
+  /// Recursively serializes a Dart value into a JSON-compatible value.
   ///
-  /// ### Mapping Table
-  /// | Dart Type          | JSON Representation                 |
-  /// |--------------------|---------------------------------------|
-  /// | null               | null                                  |
-  /// | SerializableModelI | `.toJson()`                           |
-  /// | DateTime           | ISO-8601 string (toIso8601String)     |
-  /// | Duration           | milliseconds (int)                    |
-  /// | Uri                | string                                |
-  /// | BigInt             | string                                |
-  /// | Enum               | `.name`                               |
-  /// | List / Set         | recursively serialized List           |
-  /// | Map                | keys via `.toString()`, values recursively |
-  /// | num / bool / String| unchanged                             |
+  /// | Dart type                 | JSON representation                      |
+  /// |----------------------------|-------------------------------------------|
+  /// | `null`                     | `null`                                    |
+  /// | `SerializableModelI`       | `.toJson()`                               |
+  /// | `DateTime`                 | ISO-8601 string (`toIso8601String`)       |
+  /// | `Duration`                 | milliseconds (`int`)                      |
+  /// | `Uri`                      | string                                    |
+  /// | `BigInt`                   | string                                    |
+  /// | `Enum`                     | `.name`                                   |
+  /// | `List` / `Set`             | recursively-serialized `List`             |
+  /// | `Map`                      | keys via `.toString()`, values recursive  |
+  /// | `num` / `bool` / `String`  | unchanged                                 |
   ///
-  /// Public alias: [serializeValue] — for use in [ModelBinder].
+  /// Public alias: [serializeValue] — used by `ModelBinder`.
   static Object? serializeValue(Object? v) => _serialize(v);
 
   static Object? _serialize(Object? v) => switch (v) {
     null => null,
-    // Models are serialized via their own toJson.
     final SerializableModelI m => m.toJson(),
-    // Collections — recursively.
     final List l => l.map(_serialize).toList(growable: false),
     final Set s => s.map(_serialize).toList(growable: false),
     final Map m => {
       for (final e in m.entries) e.key.toString(): _serialize(e.value),
     },
-    // Special types — into strings/numbers.
     final DateTime dt => dt.toIso8601String(),
     final Duration d => d.inMilliseconds,
     final Uri u => u.toString(),
@@ -359,13 +335,13 @@ final class SerializableHelpers {
   // Path helpers
   // ===========================================================================
 
-  /// Reads a value from [json] by the composite path `[...nesting, key]`.
+  /// Reads a value from [json] at the composite path `[...nesting, key]`.
   ///
-  /// Each [nesting] step is a key of a nested Map.
-  /// If the value is not a Map at any step — returns null (field is missing).
+  /// Each [nesting] step must itself be a `Map`; if it isn't, the field is
+  /// treated as missing and `null` is returned.
   ///
-  /// Example: `nesting=['meta', 'stats']`, `key='count'`
-  ///   → reads `json['meta']['stats']['count']`
+  /// Example: `nesting = ['meta', 'stats']`, `key = 'count'` reads
+  /// `json['meta']['stats']['count']`.
   static Object? _readPath(Json json, List<String> nesting, String key) {
     Json current = json;
     for (final step in nesting) {
@@ -376,18 +352,17 @@ final class SerializableHelpers {
     return current[key];
   }
 
-  /// Writes [value] to [map] by the composite path [keys].
+  /// Writes [value] into [map] at the composite path [keys], creating any
+  /// missing intermediate maps along the way.
   ///
-  /// Creates intermediate Maps if necessary.
-  /// If an intermediate key is explicitly null — the write is skipped
-  /// (cannot add a key to null).
+  /// If an intermediate key is explicitly `null`, the write is skipped (you
+  /// can't add a key to `null`).
   ///
-  /// Example: `keys=['meta', 'stats', 'count']`, `value=42`
-  ///   → `map['meta']['stats']['count'] = 42`
+  /// Example: `keys = ['meta', 'stats', 'count']`, `value = 42` writes
+  /// `map['meta']['stats']['count'] = 42`.
   ///
-  /// Public method — used in [ModelBinder] to write patches
-  /// of nested fields (declared via `at(...)`).
-  // ignore: library_private_types_in_public_api
+  /// Public so `ModelBinder` can write patches for nested fields (those
+  /// declared via `at(...)`).
   static void writeDeep(Json map, List<String> keys, Object? value) =>
       _writeDeep(map, keys, value);
 
@@ -395,7 +370,6 @@ final class SerializableHelpers {
     var current = map;
     for (var i = 0; i < keys.length - 1; i++) {
       final key = keys[i];
-      // If the value is explicitly null — cannot enter it as a Map, skip.
       if (current.containsKey(key) && current[key] == null) return;
       current = current.putIfAbsent(key, () => <String, Object?>{}) as Json;
     }

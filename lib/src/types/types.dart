@@ -1,62 +1,63 @@
 // =============================================================================
 // types.dart
 //
-// Common type aliases (typedefs) for the entire library.
+// Shared type aliases (typedefs) for the whole library.
 //
 // Conventions:
-//   Parser<T>    — function that takes a raw JSON value and returns T.
-//                  Implementations should be "total" (never throw
-//                  exceptions during normal use).
-//   Serializer<T>— function that converts a Dart value T into a JSON-compatible type.
-//   Json         — alias for Map<String, Object?>.
-//   JsonRaw      — alias for Map<String, dynamic> (for compatibility with APIs
-//                  that return dynamic).
+//   Parser<T>     — raw JSON value → T. Implementations should be "total"
+//                   (never throw on normal use); to express "no value", use
+//                   `T?` and return null.
+//   Serializer<T> — Dart value T → JSON-compatible value.
+//   Json          — alias for Map<String, Object?>.
+//   JsonRaw       — alias for Map<String, dynamic>, for interop with APIs
+//                   (e.g. dart:convert's jsonDecode) that hand back dynamic.
 // =============================================================================
 
-import 'model_type.dart';
 import 'field.dart';
+import 'field_patch.dart';
 
 /// `Object? → T`
 ///
-/// Parser accepts an arbitrary JSON value and returns a typed T.
-/// Implementations should be total (not throw on normal input).
-/// To handle null — use `T?` and return null.
+/// Accepts an arbitrary JSON value and returns a typed [T]. Implementations
+/// should be total — never throw on normal input. To express "no value",
+/// make `T` nullable and return `null`.
 typedef Parser<T> = T Function(Object? value);
 
 /// `T → JSON-compatible Object?`
 ///
-/// Serializer converts a Dart value back into a JSON primitive,
-/// List, Map, or nested object.
+/// Converts a Dart value back into a JSON primitive, List, Map, or nested
+/// object.
 typedef Serializer<T> = Object? Function(T value);
 
-/// Patch builder function for [copyWith] via [ModelBinder].
+/// Patch-builder function used by `copyWith` via `ModelBinder`.
 ///
-/// Takes the field schema `$` and returns a list of changes.
+/// Takes the field schema `$` and returns the list of changes to apply:
 /// ```dart
 /// sensor.copyWith(($) => [$.value.set(42.0)]);
 /// ```
 typedef FieldsBuilder<T> = Iterable<FieldPatch> Function(T $);
 
-/// Convenient alias: a field with a type-erased value type.
+/// A field with its value type erased to `Object?`.
 ///
-/// Used in field lists where the specific value type is unknown
-/// at compile time (e.g., `List<FieldOf<User>>`).
+/// Used wherever the specific value type isn't known at compile time, e.g.
+/// `List<FieldOf<User>>`.
 typedef FieldOf<M> = Field<M, Object?>;
 
-/// List of all field descriptors for model [T] in the order of constructor parameters.
+/// All field descriptors for model [T], in the exact order of its
+/// constructor parameters.
 ///
-/// This order is critical for [SerializableHelpers.fromJson],
-/// which passes values as positional arguments.
+/// The order matters: `SerializableHelpers.fromJson` passes parsed values as
+/// *positional* arguments via `Function.apply`.
 typedef ListFieldOf<T> = List<Field<T, Object?>>;
 
-/// Field values for [Equatable.props].
+/// Field values in declaration order — feeds `Equatable.props`.
 typedef Props = List<Object?>;
 
-/// Standard JSON object: keys are strings, values are arbitrary.
+/// A standard JSON object: string keys, arbitrary values.
 typedef Json = Map<String, Object?>;
 
-/// JSON object with dynamic values.
+/// A JSON object with `dynamic` values.
 ///
-/// Used when interacting with external APIs that return
+/// Useful when interacting with external APIs / `dart:convert` that return
 /// `Map<String, dynamic>` instead of `Map<String, Object?>`.
 typedef JsonRaw = Map<String, dynamic>;
