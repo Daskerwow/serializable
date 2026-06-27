@@ -13,10 +13,12 @@
 // 'created_at'.field<User, DateTime>(parser: at('meta', dateTimeOrEpoch), serializer: dateTimeToUnixSeconds)
 // ```
 //
-// There's no getter argument above: a field's value is recovered through a
-// parse-time cache (see `Field.attach`), not by calling a closure on the
-// model. Prefer `Schema.field` over this top-level extension when a model
-// already declares a schema — see model_type.dart.
+// There's no getter argument above: `Field` only describes the JSON side
+// (key, parser, serializer). A model's current values come from its own
+// `props` (the standard Equatable list — see `Serializable` in
+// serializable_model.dart), not from a closure on `Field` itself. Prefer
+// `Schema.field` over this top-level extension when a model already
+// declares a schema — see model_type.dart.
 //
 // ─── Fixed Issues ────────────────────────────────────────────────────
 //
@@ -72,12 +74,12 @@ import 'types/parser.dart';
 /// the box and a field typed `T` is required out of the box. Pass
 /// `nullable:` explicitly only to override that default.
 ///
-/// Note there's no getter parameter: this engine never reads a model's
-/// properties back through a closure. A field's value is cached against
-/// the instance the moment `fromJson` parses it (see [Field.attach]), and
-/// `toJson()`/`props` read it back from there — which is also why they
-/// only reflect real field values for instances built via `fromJson` or
-/// `copyWith`, not ones built by calling the model's constructor directly.
+/// Note there's no getter parameter: `Field` only describes the JSON side
+/// (key, parser, serializer) and carries no per-instance state. A model's
+/// current values — for `toJson()` and for `Equatable`'s `==`/`hashCode` —
+/// come from the model's own `props`, which you declare once per model the
+/// same way you would for plain `Equatable`. See [Serializable] in
+/// serializable_model.dart.
 extension FieldStringX on String {
   Field<M, R> field<M, R>({
     R Function(Object?)? parser,
@@ -126,7 +128,7 @@ Field<M, R> buildField<M, R>({
       if (raw == null) return null;
 
       // If the type is already correct — return without extra checks.
-      if (raw is R) return raw as R;
+      if (raw is R) return raw;
 
       // The type does not match — throw a typed error.
       // The full path is built from the nesting + the current key.

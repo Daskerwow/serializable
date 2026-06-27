@@ -20,6 +20,16 @@
 //      which is compatible with dateTimeOrNull (accepts ISO strings).
 //      The contract "whatever _serialize wrote, the parser will read back" is now
 //      explicitly documented.
+//
+//   4. Removed the Expando-based per-instance value cache (`Field.attach`/
+//      `readErased`). It only ever got populated by `fromJson`, so `toJson()`
+//      and `==` silently went blank — null for every field, no exception —
+//      for any instance built via its own constructor instead of
+//      `fromJson`/`copyWith` (and threw a raw cast TypeError on a custom
+//      `serializer` instead, since `null as R` is unsound for non-nullable
+//      `R`). `toJson()` is now built from `props` + `fields` (see
+//      [Serializable] below) — real values, regardless of how the instance
+//      was constructed, with no per-field getter required.
 // =============================================================================
 
 import 'package:equatable/equatable.dart';
@@ -59,14 +69,21 @@ final class _Undefined {
 
 /// Contract that every serializable model must implement.
 ///
-/// Use the [Serializable] mixin for automatic implementation of [toJson] and [props].
+/// Use the [Serializable] mixin for an automatic implementation of
+/// [toJson] — built from [fields] and [props] together. [props] itself is
+/// **not** automatic: it's the standard `Equatable` list, and it's what
+/// makes [toJson] (and `==`/`hashCode`, via `Equatable`) correct for *any*
+/// instance, not just ones built via `fromJson`/`copyWith`.
 ///
-/// ### Field Requirements ([fields])
-/// The [fields] list must contain descriptors for ALL model fields
-/// in the same order as the constructor parameters. This is critical: [SerializableHelpers.fromJson]
-/// passes values as positional arguments via [Function.apply].
+/// ### Field Requirements ([fields] and [props])
+/// [fields] must list a descriptor for every model field, and [props] must
+/// list that field's current value — **both in the same order, matching
+/// the constructor's parameter order.** This is critical for two reasons:
+/// [SerializableHelpers.fromJson] passes parsed values to the constructor
+/// positionally via [Function.apply], and [Serializable.toJson] zips
+/// [fields] with [props] index-for-index to build the JSON.
 abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
-  /// All field descriptors in the order of constructor parameters.
+  /// All field descriptors, in constructor-parameter order.
   ///
   /// Declare as `static final` and override via a getter:
   /// ```dart
@@ -79,7 +96,12 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
   /// Serializes the instance into a JSON-compatible Map.
   Json toJson();
 
-  /// Field values in the order of declaration — used by [Equatable].
+  /// This model's current field values, in the same order as [fields].
+  ///
+  /// This is the plain `Equatable` `props` list — write it the same way
+  /// you would for any `Equatable` class, referencing the model's own
+  /// properties directly (e.g. `[id, name, address]`). [Serializable]
+  /// builds both `toJson()` and `Equatable`'s `==`/`hashCode` from it.
   Props get props;
 }
 
@@ -87,15 +109,24 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
 // Serializable — mixin with automatic implementation
 // =============================================================================
 
-/// Provides automatic implementations of [toJson] and [props] via [fields].
+/// Provides an automatic implementation of [toJson], built from [fields]
+/// and [props].
+///
+/// This mixin does **not** implement [props] for you — `Equatable` still
+/// requires you to declare it, exactly as in plain `Equatable` usage. The
+/// reason is fundamental, not a missing feature: without code generation
+/// or runtime reflection (unavailable on Flutter/AOT), there is no way to
+/// read a model's current field values generically. A per-field getter
+/// closure on [Field] could do it, but would need to be both declared by
+/// the user *and* threaded through `Field<M, R>`'s type erasure — `props`
+/// gets the same result (real values, for any instance, however it was
+/// built) from a single, ordinary `Equatable` list instead.
 ///
 /// ### Full Model Example
 ///
-/// This shows the engine's two lowest-level building blocks directly: a
-/// plain [ListFieldOf] and the `undefined`-sentinel `copyWith`. Most models
-/// instead declare a [Schema] and go through [ModelType]/[ModelBinder],
-/// which wrap both of these and add type-safe, name-based field access —
-/// see the package README.
+/// Most models declare a [Schema] and go through [ModelType]/[ModelBinder]
+/// instead of the plain field list shown here — see the package README —
+/// but `props` is required either way.
 /// ```dart
 /// class User extends Equatable with Serializable<User> {
 ///   final int    id;
@@ -113,6 +144,11 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
 ///   @override
 ///   ListFieldOf<User> get fields => _fields;
 ///
+///   // The one manual line `Serializable` doesn't write for you — same
+///   // order as `_fields` above, same order as the constructor.
+///   @override
+///   Props get props => [id, name, address];
+///
 ///   static User fromJson(Map<String, Object?> json) =>
 ///       SerializableHelpers.fromJson(json, _fields, User.new);
 ///
@@ -127,10 +163,7 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
 mixin Serializable<M extends SerializableModelI<M>> on Equatable
     implements SerializableModelI<M> {
   @override
-  Json toJson() => SerializableHelpers._buildJson<M>(fields, this as M);
-
-  @override
-  Props get props => [for (final f in fields) f.readErased(this)];
+  Json toJson() => SerializableHelpers._buildJson<M>(fields, props);
 }
 
 // =============================================================================
@@ -218,15 +251,7 @@ final class SerializableHelpers {
 
     // Call the constructor with positional arguments.
     try {
-      final instance = Function.apply(factory, args) as R;
-
-      // Attach the already-parsed args back onto their fields — strictly
-      // positional, the same order used when building args. No re-parsing.
-      for (var i = 0; i < fields.length; i++) {
-        fields[i].attach(instance as Object, args[i]);
-      }
-
-      return instance;
+      return Function.apply(factory, args) as R;
     } catch (e, st) {
       Error.throwWithStackTrace(
         SerializationError(
@@ -301,18 +326,29 @@ final class SerializableHelpers {
   // toJson (internal)
   // ===========================================================================
 
-  /// Builds a JSON-Map from the model fields.
+  /// Builds a JSON-Map from [fields] and the model's [props] — index `i` of
+  /// `props` is the current value of `fields[i]`. Both must be the same
+  /// length and in the same (constructor-parameter) order; see
+  /// [SerializableModelI] for why.
   ///
   /// For each field:
   ///   - If there is a custom serializer → use it via the type-erased wrapper.
   ///   - Otherwise → [_serialize] with default smart logic.
   ///
   /// Fields with nesting are written via [_writeDeep] — creates nested Maps on the fly.
-  static Json _buildJson<M>(ListFieldOf<M> fields, M instance) {
+  static Json _buildJson<M>(ListFieldOf<M> fields, Props props) {
+    assert(
+      fields.length == props.length,
+      '_buildJson: fields (${fields.length}) and props (${props.length}) '
+      'must be the same length and in the same order — both must list every '
+      "field in the model's constructor-parameter order.",
+    );
+
     final result = <String, Object?>{};
 
-    for (final f in fields) {
-      final val = f.readErased(instance as Object);
+    for (var i = 0; i < fields.length; i++) {
+      final f = fields[i];
+      final val = props[i];
 
       final serialized = f.hasSerializer
           // Use the type-erased wrapper — safe with an erased type.

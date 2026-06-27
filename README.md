@@ -18,11 +18,18 @@ class Sensor extends Equatable with Serializable<Sensor> {
 
   // M is always explicit — Dart can't infer it from a positional
   // constructor. This order is what `Function.apply` uses internally, so
-  // `SensorSchema.all` must list fields in this same order.
+  // `SensorSchema.all` (and `props` below) must list fields in this same
+  // order.
   static final $ = ModelType<Sensor, SensorSchema>(Sensor.new, SensorSchema());
 
   @override
   ListFieldOf<Sensor> get fields => $.schema.all;
+
+  // `Equatable`'s own list — `Serializable` doesn't write this for you.
+  // It's what makes `toJson()` (below) and `==`/`hashCode` work correctly
+  // no matter how a `Sensor` was constructed, not just via `fromJson`.
+  @override
+  Props get props => [uid, value];
 
   factory Sensor.fromJson(Json json) => $.call(json);
 
@@ -48,21 +55,22 @@ void main() {
 }
 ```
 
-No `.g.dart` files, no `build_runner` step — `toJson`, `fromJson`, `==`/
-`hashCode` (via `Equatable`), and `copyWith` are all derived from
-`SensorSchema` above.
+No `.g.dart` files, no `build_runner` step — `toJson` and `copyWith` are
+both derived from `SensorSchema` and `props` above (and `==`/`hashCode`
+come from `Equatable`, driven by that same `props`).
 
-> **Always construct via `fromJson` or `copyWith`.** A field's value is
-> cached against an instance the moment `fromJson` parses it — `toJson()`
-> and `==` read that cache back, rather than calling a getter. Building a
-> `Sensor` by calling its constructor directly works for the constructor's
-> own purpose (it's what `ModelType` invokes via `Function.apply`), but
-> `toJson()`/`==` on such an instance won't reflect the values you passed
-> in. See `Field.attach` in the source for the mechanism.
+> **Why `props` is required.** Without code generation or runtime
+> reflection (unavailable on Flutter/AOT), nothing can read a model's
+> current field values generically — something has to supply them. A
+> per-field getter closure on `Field` could do it, but `props` gets the
+> same result with one ordinary `Equatable` list instead, and as a bonus
+> it means `toJson()`/`==` are correct for _any_ `Sensor`, including one
+> built by calling its constructor directly — not just ones built via
+> `fromJson`/`copyWith`.
 
 ## Why a `Schema` class, and not a string key, `Symbol`, or Record?
 
-`copyWith`'s builder needs *some* way to give you back the right `Field`
+`copyWith`'s builder needs _some_ way to give you back the right `Field`
 object for a given model property — `$.title`, ideally, not `$['title']`.
 There's no codegen-free way to ask Dart "what property does this model
 expose under this name?": Dart has no runtime reflection on Flutter/AOT
@@ -76,7 +84,7 @@ against any real declaration (`#tiel` "compiles" exactly as readily as
 `'tiel'` would), and `Symbol`/reflection-based dispatch generally isn't
 safe under `dart compile exe --obfuscate`, which is also why this package
 never uses named-argument `Function.apply` dispatch internally. A Dart
-*Record* is another option (and is what earlier versions of this package
+_Record_ is another option (and is what earlier versions of this package
 used — see the CHANGELOG) — but it's a second declaration to keep in sync
 with the field list `ModelType` actually needs.
 
@@ -85,7 +93,7 @@ field<String>('display_name');` on a class extending `Schema<M>` — gets
 the same compiler guarantees a Record does (`$.title` is resolved by the
 analyzer like any other member access; a typo is a compile error, not a
 runtime one), while also being the field list itself: the schema's
-required `all` getter *is* the ordered list `ModelType` feeds into
+required `all` getter _is_ the ordered list `ModelType` feeds into
 `fromJson`. One declaration covers both `fromJson`/`toJson` and type-safe
 `copyWith` — there's no separate Record `typedef` to keep matching it.
 
@@ -93,8 +101,8 @@ required `all` getter *is* the ordered list `ModelType` feeds into
 
 - **`Field<M, R>`** — a descriptor for one JSON key: how to parse it from
   JSON (`parser`), whether `null` is acceptable (`nullable`, defaulting to
-  `null is R`), and an optional custom `serializer`. It does *not* hold a
-  getter — see the "Always construct via `fromJson`" note above.
+  `null is R`), and an optional custom `serializer`. It carries no getter
+  and no per-instance state — see the "Why `props` is required" note above.
 - **`Schema<M>`** — a class you extend, declaring each field once as a
   `late final` member via `field<R>(jsonKey, ...)`. The required `all`
   getter lists every field **in constructor-parameter order** — the one
@@ -102,10 +110,10 @@ required `all` getter *is* the ordered list `ModelType` feeds into
   individual fields (just fill in `all` directly) if a model doesn't need
   `copyWith` — see "Minimal" below.
 - **`ModelType<M, S>`** — binds a `Schema` instance to the model's
-  constructor; the engine behind `fromJson` (and what `toJson`/`props`
-  iterate, via `Serializable`).
+  constructor; the engine behind `fromJson` (and what `toJson` iterates,
+  via `Serializable`, together with `props`).
 - **`ModelBinder<M, S>`** — what `ModelType.bind` returns; a stored,
-  callable `copyWith`, generic over whatever `Schema` (`S`) you handed it.
+  callable `copyWith`.
 
 ### Minimal — no `copyWith`
 
@@ -121,6 +129,9 @@ class Gadget extends Equatable with Serializable<Gadget> {
   @override
   ListFieldOf<Gadget> get fields => $.schema.all;
 
+  @override
+  Props get props => [uid, reading];
+
   static Gadget fromJson(Json json) => $.call(json);
 }
 
@@ -134,9 +145,9 @@ final class GadgetSchema extends Schema<Gadget> {
 ```
 
 No named per-field members, no `copyWith` — just `fromJson`/`toJson`, via
-the top-level `.field()` string extension straight inside `all`. Give
-fields names (as in the Quick start above) only once you actually want
-type-safe `copyWith`.
+the top-level `.field()` string extension straight inside `all`. `props`
+is still required (`Equatable` always needs it); give fields names (as in
+the Quick start above) only once you actually want type-safe `copyWith`.
 
 ### Decoupling the wire format from `copyWith` call sites
 
@@ -166,7 +177,9 @@ terminal.copyWith(($) => [
 
 If the wire format changes (`display_name` → `name`), every `copyWith`
 call site above is untouched — only the one line declaring `title` inside
-`TerminalSchema` needs to change.
+`TerminalSchema` needs to change. (`Terminal` itself still needs `props`
+listing `title`, `status`, etc. in this same order — `Schema.all` and
+`props` are two separate lists that both have to match the constructor.)
 
 ## Field nullability
 

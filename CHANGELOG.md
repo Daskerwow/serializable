@@ -1,5 +1,64 @@
 # Changelog
 
+## 4.0.0 — `toJson()` built from `props`, not a per-instance cache
+
+`Serializable` no longer auto-implements `props`. Every model must declare
+it itself — the same plain `Equatable` list you'd write with or without
+this package — and `Serializable.toJson()` is now built by zipping that
+list with `fields`, index for index:
+
+```dart
+class Terminal extends Equatable with Serializable<Terminal> {
+  // ...
+  @override
+  ListFieldOf<Terminal> get fields => $.schema.all;
+
+  @override
+  Props get props => [id, title, status, sensors, tokens]; // ← new requirement
+}
+```
+
+### Why
+
+`Field` previously cached each parsed value against the instance it was
+parsed _for_, via an `Expando` (`Field.attach`, populated only by
+`fromJson`), and `toJson()`/`props` read that cache back instead of
+calling a getter. That cache was only ever populated by `fromJson` — so
+for any model built by calling its own constructor directly (a perfectly
+normal thing to do with a public, often `const`, constructor), every field
+came back `null`:
+
+- `toJson()` silently produced an all-`null` JSON object, no exception.
+- `==`/`hashCode` (via `Equatable`, also reading the same cache) treated
+  every such instance as equal to every other one, regardless of actual
+  field values.
+- Worse, a field with a custom `serializer` crashed outright —
+  `serializer(null as R)` for a non-nullable `R` threw a raw
+  `type 'Null' is not a subtype of type '...'` `TypeError`, surfacing deep
+  inside `Field`'s type-erasure wrapper with no useful context. This is
+  exactly what happens the moment such an instance's `copyWith` is called,
+  since `copyWith` starts by calling `toJson()` on the current instance.
+
+Fixing this without a per-field getter on `Field` (which would need both a
+user-supplied closure _and_ a contravariant type-erasure wrapper, the same
+problem `serializer` already has) means the model has to supply its
+current values some other way. `props` already exists for exactly this —
+`Equatable` requires it from every subclass — so `toJson()` now reads from
+it instead of from a cache. The result is simpler (the `Expando`, `attach`,
+and `readErased` machinery is gone from `Field` entirely) and correct
+unconditionally: `toJson()`/`==` now reflect real values for _any_
+instance, not only ones built via `fromJson`/`copyWith`.
+
+### Breaking
+
+- `Serializable<M>` no longer provides a default `props` — implement it
+  yourself, listing the same fields in the same order as `fields`/`all`
+  and the constructor. This is one line per model; see the README and the
+  `Serializable` doc comment for the full pattern.
+- `Field.attach` and `Field.readErased` are removed. Nothing in this
+  package called them except the now-deleted cache-population loop in
+  `fromJson` and the now-deleted default `props` getter.
+
 ## 3.0.0 — `Schema` classes, replacing the Record requirement
 
 `ModelType<M, S>` now takes a **`Schema<M>` instance** instead of a bare
@@ -33,7 +92,7 @@ with **two** declarations to keep in sync: the Record `typedef` (the named
 accessors) and the plain field list passed to `ModelType` (the
 constructor-parameter order `fromJson` actually needs). `Schema<M>` is
 both at once: its members are the named accessors, and its `all` getter
-*is* the ordered field list. One declaration instead of two, with the same
+_is_ the ordered field list. One declaration instead of two, with the same
 guarantee a Record gave — a typo in `$.vlaue` is still a compile error,
 not a runtime one.
 

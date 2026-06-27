@@ -22,6 +22,9 @@ class Sensor extends Equatable with Serializable<Sensor> {
   @override
   ListFieldOf<Sensor> get fields => $.schema.all;
 
+  @override
+  Props get props => [uid, value, history];
+
   static Sensor fromJson(Json json) => $.call(json);
   Sensor copyWith(FieldsBuilder<SensorSchema> updates) => $.bind(this)(updates);
 }
@@ -55,6 +58,9 @@ class Terminal extends Equatable with Serializable<Terminal> {
 
   @override
   ListFieldOf<Terminal> get fields => $.schema.all;
+
+  @override
+  Props get props => [id, title, status, sensors, tokens];
 
   static Terminal fromJson(Json json) => $.call(json);
 
@@ -109,9 +115,6 @@ void main() {
     'access_keys': {'read': 'key_r', 'write': 'key_w'},
   };
 
-  // NOTE: models here are always built via fromJson/copyWith, never via the
-  // bare constructor directly — toJson()/== only reflect real field values
-  // for instances built that way (see Field.attach for why).
   final t = Terminal.fromJson(raw);
   print('id: ${t.id}, title: ${t.title}, status: ${t.status}');
 
@@ -133,4 +136,13 @@ void main() {
   // The toJson() method is implemented automatically without code generation!
   print(s2.toJson());
   print(t.toJson());
+
+  // toJson()/== are built from `props`, so they work just as correctly on
+  // a Terminal built by calling its constructor directly — no fromJson
+  // involved at all — as long as `props` (and `fields`) list every
+  // argument in the same order as the constructor.
+  final direct = Terminal(1, 'Direct', DeviceStatus.active, const [], const {});
+  final directUpdated = direct.copyWith(($) => [$.title.set('Direct Updated')]);
+  print('direct-construction toJson: ${direct.toJson()}');
+  print('direct-construction copyWith: ${directUpdated.toJson()}');
 }
