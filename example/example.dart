@@ -6,6 +6,10 @@ enum DeviceStatus { active, maintenance, offline, unknown }
 
 enum AccessLevel { read, write, execute }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Sensor
+// ══════════════════════════════════════════════════════════════════════════════
+
 class Sensor extends Equatable with Serializable<Sensor> {
   const Sensor(this.uid, this.value, this.history);
 
@@ -13,31 +17,27 @@ class Sensor extends Equatable with Serializable<Sensor> {
   final double value;
   final List<DateTime> history;
 
-  static final $ = ModelType<Sensor>(Sensor.new, [
-    'sensor_uid'.field<Sensor, String>((m) => m.uid),
-    'last_value'.field((m) => m.value, parser: doubleOrZero),
-    'history_logs'.field((m) => m.history, parser: listOf(dateTimeOrEpoch)),
-  ]);
+  static final $ = ModelType<Sensor, SensorSchema>(Sensor.new, SensorSchema());
 
   @override
-  ListFieldOf<Sensor> get fields => $.all;
+  ListFieldOf<Sensor> get fields => $.schema.all;
+
   static Sensor fromJson(Json json) => $.call(json);
+  Sensor copyWith(FieldsBuilder<SensorSchema> updates) => $.bind(this)(updates);
+}
+
+final class SensorSchema extends Schema<Sensor> {
+  late final uid = field<String>('sensor_uid');
+  late final value = field<double>('last_value');
+  late final history = field('history_logs', parser: listOf(dateTimeOrEpoch));
+
+  @override
+  late final all = [uid, value, history];
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Terminal — same idea, with an enum, a nested model list, and a Map field.
-// Notice `name`/`jsonKey` decoupling falls out for free here: the Record's
-// field is called `title`, the wire key is `display_name` — nothing extra
-// needed to keep `copyWith` call sites independent of the JSON shape.
+// Terminal
 // ══════════════════════════════════════════════════════════════════════════════
-
-typedef TerminalFields = (
-  Field<Terminal, int> id,
-  Field<Terminal, String> title,
-  Field<Terminal, DeviceStatus> status,
-  Field<Terminal, List<Sensor>> sensors,
-  Field<Terminal, Map<AccessLevel, String>> tokens,
-);
 
 class Terminal extends Equatable with Serializable<Terminal> {
   const Terminal(this.id, this.title, this.status, this.sensors, this.tokens);
@@ -48,40 +48,44 @@ class Terminal extends Equatable with Serializable<Terminal> {
   final List<Sensor> sensors;
   final Map<AccessLevel, String> tokens;
 
-  static final TerminalFields _fields = (
-    't_id'.field((m) => m.id, parser: intOrZero),
-    'display_name'.field((m) => m.title, parser: stringOrDefault('Unnamed')),
-    'device_status'.field(
-      (m) => m.status,
-      parser: enumOrFirst(DeviceStatus.values),
-      serializer: enumToJson,
-    ),
-    'attached_sensors'.field(
-      (m) => m.sensors,
-      parser: listOf(modelOf(Sensor.fromJson)),
-    ),
-    'access_keys'.field(
-      (m) => m.tokens,
-      parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
-      serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
-    ),
+  static final $ = ModelType<Terminal, TerminalSchema>(
+    Terminal.new,
+    TerminalSchema(),
   );
 
-  static final $ = ModelType<Terminal>(Terminal.new, [
-    _fields.$1,
-    _fields.$2,
-    _fields.$3,
-    _fields.$4,
-    _fields.$5,
-  ]);
-
   @override
-  ListFieldOf<Terminal> get fields => $.all;
+  ListFieldOf<Terminal> get fields => $.schema.all;
 
   static Terminal fromJson(Json json) => $.call(json);
 
-  Terminal copyWith(FieldsBuilder<TerminalFields> builder) =>
-      $.bind(this, _fields)(builder);
+  Terminal copyWith(FieldsBuilder<TerminalSchema> updates) =>
+      $.bind(this)(updates);
+}
+
+final class TerminalSchema extends Schema<Terminal> {
+  late final id = field<int>('t_id');
+  late final title = field('display_name', parser: stringOrDefault('Unnamed'));
+  late final status = field(
+    'device_status',
+    parser: enumOrFirst(DeviceStatus.values),
+    // Optional here: `_serialize`'s default already handles `Enum` via
+    // `.name`. Spelled out anyway to show how a custom serializer plugs in.
+    serializer: enumToJson,
+  );
+  late final sensors = field(
+    'attached_sensors',
+    parser: listOf(modelOf(Sensor.fromJson)),
+  );
+  late final tokens = field(
+    'access_keys',
+    parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
+    // Not optional: the default Map serializer keys by `.toString()`
+    // ("AccessLevel.read"), not `.name` ("read") — this is what fixes that.
+    serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
+  );
+
+  @override
+  late final all = [id, title, status, sensors, tokens];
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -99,30 +103,34 @@ void main() {
         'last_value': 25,
         'history_logs': ['2026-01-07T10:00:00Z', '2026-01-07T15:30:00Z'],
       },
+
+      {'sensor_uid': 'SN-002', 'last_value': 14.5, 'history_logs': []},
     ],
     'access_keys': {'read': 'key_r', 'write': 'key_w'},
   };
 
+  // NOTE: models here are always built via fromJson/copyWith, never via the
+  // bare constructor directly — toJson()/== only reflect real field values
+  // for instances built that way (see Field.attach for why).
   final t = Terminal.fromJson(raw);
   print('id: ${t.id}, title: ${t.title}, status: ${t.status}');
 
-  // $.title / $.status are native Record field accesses — no string keys,
-  // no custom lookup operator, nothing to misspell without the analyzer
-  // catching it immediately.
   final u = t.copyWith(
-    ($) => [$.$2.set('ZONE_B'), $.$3.set(DeviceStatus.maintenance)],
+    ($) => [$.title.set('ZONE_B'), $.status.set(DeviceStatus.maintenance)],
   );
+
   print('updated: ${u.title} / ${u.status}, id same: ${u.id == t.id}');
 
-  final s2 = t.sensors.first;
+  final s2 = t.sensors.first.copyWith(($) => [$.value.set(99.9)]);
+
   print(
     'sensor value: ${s2.value}, uid same: ${s2.uid == t.sensors.first.uid}',
   );
-  print(s2.toJson());
 
   print('round-trip: ${t == Terminal.fromJson(raw)}');
   print('changed: ${t == u}');
 
-  // toJson() is fully automatic — no code generation involved.
+  // The toJson() method is implemented automatically without code generation!
+  print(s2.toJson());
   print(t.toJson());
 }

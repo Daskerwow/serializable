@@ -32,10 +32,10 @@ List<String> nestingOf(Function parser) =>
 ///
 /// ```dart
 /// // json['address']['city'] as a String:
-/// 'city'.field((m) => m.city, parser: at('address', stringOrEmpty))
+/// 'city'.field(parser: at('address', stringOrEmpty))
 ///
 /// // Chained — json['meta']['stats']['count'] as an int:
-/// 'count'.field((m) => m.count, parser: at('meta', at('stats', intOrZero)))
+/// 'count'.field(parser: at('meta', at('stats', intOrZero)))
 /// ```
 ///
 /// See the file header for why [child] receives the already-resolved leaf

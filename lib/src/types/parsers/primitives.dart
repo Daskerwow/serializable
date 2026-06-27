@@ -137,7 +137,7 @@ num numOrThrow(Object? v) =>
 @pragma('vm:prefer-inline')
 BigInt? bigIntOrNull(Object? v) => switch (v) {
   null => null,
-  final int n => BigInt.from(n),
+  final num n => BigInt.from(n.toInt()),
   final String s => BigInt.tryParse(s.trim()),
   final bool b => b ? BigInt.one : BigInt.zero,
   _ => null,
@@ -210,7 +210,9 @@ Uri? uriOrNull(Object? v) => switch (stringOrNull(v)) {
 /// [uriOrNull] when the field must hold a real web address.
 @pragma('vm:prefer-inline')
 Uri? httpUriOrNull(Object? v) => switch (uriOrNull(v)) {
-  final Uri u when u.hasScheme && u.host.isNotEmpty => u,
+  final Uri u
+      when (u.scheme == 'http' || u.scheme == 'https') && u.host.isNotEmpty =>
+    u,
   _ => null,
 };
 

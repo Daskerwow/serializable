@@ -14,9 +14,9 @@ import 'primitives.dart' show intOrNull;
 /// Smart `DateTime` parser: accepts ISO-8601 strings and Unix timestamps.
 ///
 /// The seconds-vs-milliseconds threshold is `> 10000000000` — roughly the
-/// year 2001 if read as seconds, or 1970 + ~116 days if read as
-/// milliseconds — so real-world timestamps land unambiguously on the right
-/// side.
+/// year 2286 if read as seconds, or 1970 + ~116 days if read as
+/// milliseconds — so real-world timestamps (a handful of digits short of
+/// either extreme) land unambiguously on the right side.
 @pragma('vm:prefer-inline')
 DateTime? dateTimeOrNull(Object? v) => switch (v) {
   null => null,

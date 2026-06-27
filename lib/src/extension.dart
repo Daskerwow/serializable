@@ -1,134 +1,163 @@
 // =============================================================================
 // extension.dart
 //
-// Syntactic sugar: declaring a field via a JSON key string literal.
+// Syntactic sugar: declaring a field via a JSON key as a string literal.
 //
-// Usage:
+// Usage example:
 // ```dart
-// 'user_id'.field((m) => m.id, parser: intOrZero)
-// 'name'.field((m) => m.name)     // smart inference for String
-// 'status'.field((m) => m.status, parser: enumOrDefault(Status.values, Status.unknown))
-// 'tags'.field((m) => m.tags, parser: listOf(stringOrEmpty))
-// 'address'.field((m) => m.address, parser: modelOrNull(Address.fromJson))
-// 'created_at'.field((m) => m.ts, parser: at('meta', dateTimeOrEpoch), serializer: dateTimeToUnixSeconds)
+// 'user_id'.field<User, int>(parser: intOrZero)
+// 'name'.field<User, String>()                          // smart inference for String
+// 'status'.field<User, Status>(parser: enumOrDefault(Status.values, Status.unknown))
+// 'tags'.field<User, List<String>>(parser: listOf(stringOrEmpty))
+// 'address'.field<User, Address?>(parser: modelOrNull(Address.fromJson))
+// 'created_at'.field<User, DateTime>(parser: at('meta', dateTimeOrEpoch), serializer: dateTimeToUnixSeconds)
 // ```
 //
-// ─── Design notes ───────────────────────────────────────────────────────────
+// There's no getter argument above: a field's value is recovered through a
+// parse-time cache (see `Field.attach`), not by calling a closure on the
+// model. Prefer `Schema.field` over this top-level extension when a model
+// already declares a schema — see model_type.dart.
 //
-//   • Single source of truth for the required-field check.
-//     The parser closure built here only *parses* — it returns `null` when
-//     it can't, and never decides whether that's acceptable. The one place
-//     that makes that call is `SerializableHelpers.fromJson`, based on
-//     `Field.nullable`. This keeps `RequiredFieldError` from ever being
-//     raised twice for the same field.
+// ─── Fixed Issues ────────────────────────────────────────────────────
 //
-//   • No unsound cast for the `null` case.
-//     `Field.parser` is typed `Object? Function(Object?)`, not
-//     `R Function(Object?)` — so returning `null` here for a non-nullable
-//     `R` is always safe. There's no `null as R` cast that could throw
-//     before `fromJson` even gets a chance to look at the value.
+//   1. Eliminated double null-checking.
+//      Previously, RequiredFieldError could be thrown twice for the same field:
+//        - first time inside the parser closure (here),
+//        - second time in SerializableHelpers.fromJson after returning from the parser.
+//      Now the null-check lives in ONLY ONE place — in SerializableHelpers.
+//      Here we simply return null, and fromJson decides whether this is acceptable.
 //
-//   • `nullable` defaults from `R`.
-//     If you don't pass `nullable` explicitly, it's derived as `null is R` —
-//     a field typed `String?` is optional out of the box, a field typed
-//     `String` is required out of the box. Pass it explicitly only to
-//     override that default (e.g. a `T?` field you still want to treat as
-//     required).
+//   2. _smartParse no longer conflicts with the nullable mechanism.
+//      Previously, nullable primitives (int?, String?...) were processed in parallel
+//      with the field's nullable flag, which created inconsistent behavior.
+//      Now _smartParse always works with a specific type R, and the nullable
+//      logic is centralized in SerializableHelpers.fromJson.
 // =============================================================================
 
 import 'errors.dart';
 import 'types/field.dart';
 import 'types/parser.dart';
 
-/// Extension on [String] for declaratively defining model fields.
+/// Extension on [String] for declarative, top-level definition of a model
+/// field. Prefer [Schema.field] when the model already declares a schema —
+/// it reads more naturally (`field<R>(jsonKey, ...)`, with `M` already
+/// known from the schema's own type parameter) and is what every model in
+/// the README actually uses. This extension is for the rare field declared
+/// outside any [Schema].
+///
+/// ### Type parameters
+///
+/// **[M]** and **[R]** can't be inferred from any argument here — neither
+/// appears in the parameter list, only in the `Field<M, R>` return type —
+/// so this needs an explicit `.field<User, String>(...)` call, or a
+/// surrounding expression whose expected type pins them down.
 ///
 /// ### Parameters
 ///
-/// **[getter]** — extracts the value from a model instance. The return
-/// type [R] is inferred from it (and from [parser], if given).
+/// **[parser]** — explicit parser. If omitted, [_smartParse] picks a
+/// default parser for primitive types (`int`, `String`, `bool`, ...) based
+/// on [R]. For complex types (`List`, models, `Enum`) an explicit parser is
+/// mandatory — there's nothing for `_smartParse` to infer for those.
 ///
-/// **[name]** — the Dart constructor parameter name, if it differs from the
-/// JSON key. Used in error messages and in `FieldPatch`es. Defaults to the
-/// JSON key:
-/// ```dart
-/// 'created_at'.field((m) => m.createdAt, name: 'createdAt')
-/// ```
+/// **[serializer]** — custom serializer for `toJson()`. If omitted, the
+/// universal [SerializableHelpers._serialize] is used — it already handles
+/// `DateTime`, `Duration`, `Uri`, `BigInt`, `Enum`, and nested
+/// `SerializableModelI` models on its own. A custom serializer is only
+/// needed for something `_serialize` can't infer (e.g. an `Enum`-keyed
+/// `Map`, whose default serialization would key by `.toString()` rather
+/// than `.name`).
 ///
-/// **[parser]** — explicit parser. If omitted, a smart default parser is
-/// picked for known primitive types (`int`, `String`, `bool`, ...). Complex
-/// types (`List`, models, `Enum`) require an explicit parser.
+/// **[nullable]** — whether a `null` value from JSON is acceptable for this
+/// field. Defaults to `null is R`, so a field typed `T?` is optional out of
+/// the box and a field typed `T` is required out of the box. Pass
+/// `nullable:` explicitly only to override that default.
 ///
-/// **[serializer]** — custom serializer. If omitted, the universal
-/// `SerializableHelpers` serialization logic is used.
-///
-/// **[nullable]** — whether `null` from JSON is acceptable. Defaults to
-/// `null is R` (see the design notes above) — pass it only to override that.
+/// Note there's no getter parameter: this engine never reads a model's
+/// properties back through a closure. A field's value is cached against
+/// the instance the moment `fromJson` parses it (see [Field.attach]), and
+/// `toJson()`/`props` read it back from there — which is also why they
+/// only reflect real field values for instances built via `fromJson` or
+/// `copyWith`, not ones built by calling the model's constructor directly.
 extension FieldStringX on String {
-  Field<M, R> field<M, R>(
-    R Function(M) getter, {
-    String? name,
+  Field<M, R> field<M, R>({
     R Function(Object?)? parser,
     Object? Function(R)? serializer,
     bool? nullable,
-  }) {
-    // The nesting path comes from the parser's metadata, if `at(...)` was
-    // used to build it. Empty for ordinary top-level fields.
-    final nesting = parser != null ? nestingOf(parser) : const <String>[];
-    final fieldName = name ?? this;
+  }) => buildField<M, R>(
+    jsonKey: this,
+    parser: parser,
+    serializer: serializer,
+    nullable: nullable,
+  );
+}
 
-    return Field<M, R>(
-      jsonKey: this,
-      fieldName: fieldName,
-      nesting: nesting,
-      getter: (Object? m) => getter(m as M),
-      nullable: nullable,
-      serializer: serializer,
-      // ─── Parser closure ────────────────────────────────────────────────
-      //   • Only parses — returns `null` when it can't.
-      //   • The required check (the null guard) lives only in `fromJson`.
-      parser: (Object? v) {
-        final raw = parser != null ? parser(v) : _smartParse<R>(v);
+Field<M, R> buildField<M, R>({
+  required String jsonKey,
+  R Function(Object?)? parser,
+  Object? Function(R)? serializer,
+  bool? nullable,
+}) {
+  // Extract the nesting path from the parser metadata (if at() was used).
+  // Empty for regular top-level fields.
+  final nesting = parser != null ? nestingOf(parser) : const <String>[];
 
-        // A `null` result is valid here — `fromJson` decides whether it's
-        // acceptable. No unsound cast needed: see the file header.
-        if (raw == null) return null;
+  // Smart default: a field typed `T?` is optional out of the box. An
+  // explicitly-passed `nullable:` always wins over this default.
+  final resolvedNullable = nullable ?? (null is R);
 
-        // Already the right runtime type — nothing more to do.
-        if (raw is R) return raw;
+  return Field<M, R>(
+    jsonKey: jsonKey,
+    nesting: nesting,
+    nullable: resolvedNullable,
+    serializer: serializer,
+    // ─── Parser closure ──────────────────────────────────────────────────
+    //   • The parser only parses — returns null if it couldn't.
+    //   • The required check (null guard) — only in fromJson.
+    //   • This eliminates duplication and confusion with error paths.
+    parser: (Object? v) {
+      // Apply the explicit parser or try to smartly infer the type.
+      final raw = parser != null ? parser(v) : _smartParse<R>(v);
 
-        // Wrong type — fail with full context instead of a bare CastError
-        // surfacing somewhere downstream.
-        throw TypeConversionError(
-          modelType: M,
-          fieldName: fieldName,
-          path: [...nesting, this].join('.'),
-          expectedType: R,
-          actualType: raw.runtimeType,
-          rawValue: raw,
-        );
-      },
-    );
-  }
+      // Return null as is — fromJson will decide if this is acceptable.
+      // The responsibility for RequiredFieldError is moved to fromJson.
+      // (No cast to R here: `Field.parser` is `Object? Function(Object?)`,
+      // precisely so a `null` for a non-nullable R doesn't need an unsound
+      // `null as R` to satisfy the return type.)
+      if (raw == null) return null;
+
+      // If the type is already correct — return without extra checks.
+      if (raw is R) return raw as R;
+
+      // The type does not match — throw a typed error.
+      // The full path is built from the nesting + the current key.
+      throw TypeConversionError(
+        modelType: M,
+        jsonKey: jsonKey,
+        path: [...nesting, jsonKey].join('.'),
+        expectedType: R,
+        actualType: raw.runtimeType,
+        rawValue: raw,
+      );
+    },
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/// `true` exactly when type `T` equals type `R`.
+/// Returns `true` if type `T` is exactly equal to type `R`.
 ///
-/// Dart doesn't let you compare generic types directly; reifying both as
-/// type arguments and comparing via `==` does the job. Used to pick the
-/// right default parser in [_smartParse].
+/// Used to select the parser in [_smartParse].
+/// Dart does not allow comparing generic types directly — this helper
+/// creates concrete instances for comparison via `==`.
 bool _isType<T, R>() => T == R;
 
-/// Default parser for primitive types, used when no explicit `parser` is
-/// given to [FieldStringX.field].
+/// Smart default parser for primitive types.
 ///
-/// Returns the matching default for a known primitive [R] (see
-/// `parsers/primitives.dart` and `parsers/temporal.dart`). For unknown
-/// types (`List`, `Map`, custom models, `Enum`, ...) it returns [v] as-is —
-/// the caller must supply an explicit `parser` for those.
+/// If type [R] is a known primitive, it calls the corresponding parser from parser.dart.
+/// For unknown types, it returns [v] unchanged — it is assumed that
+/// the calling side will pass the correct [parser].
 Object? _smartParse<R>(Object? v) {
-  // ── Non-nullable primitives ────────────────────────────────────────────
+  // ── Non-nullable primitives ────────────────────────────────────────────────
   if (_isType<int, R>()) return intOrZero(v);
   if (_isType<double, R>()) return doubleOrZero(v);
   if (_isType<num, R>()) return numOrZero(v);
@@ -139,9 +168,9 @@ Object? _smartParse<R>(Object? v) {
   if (_isType<Uri, R>()) return uriOrEmpty(v);
   if (_isType<BigInt, R>()) return bigIntOrZero(v);
 
-  // ── Nullable primitives ────────────────────────────────────────────────
-  // `null is R` is a runtime null-compatibility check: true when R itself
-  // allows null (e.g. R == int?).
+  // ── Nullable primitives ────────────────────────────────────────────────────
+  // Checked via `null is R` — this is a runtime null-compatibility check.
+  // If R allows null, the orNull variants of the parsers are used.
   if (null is R) {
     if (_isType<int?, R>()) return intOrNull(v);
     if (_isType<double?, R>()) return doubleOrNull(v);
@@ -154,6 +183,7 @@ Object? _smartParse<R>(Object? v) {
     if (_isType<BigInt?, R>()) return bigIntOrNull(v);
   }
 
-  // Unknown type — pass through; the caller must supply an explicit parser.
+  // Unknown type (List, Map, custom model, Enum) — pass through as is.
+  // The calling side must pass an explicit [parser] for such types.
   return v;
 }

@@ -3,49 +3,46 @@
 //
 // Descriptor for a single JSON field of a model.
 //
-// Do not construct [Field] directly — use the `FieldStringX` extension:
-//   'json_key'.field((m) => m.property, parser: intOrZero)
+// Do not create [Field] directly — use the [FieldStringX] extension:
+//   'json_key'.field<M, int>(parser: intOrZero)
 //
-// ─── Type erasure ────────────────────────────────────────────────────────────
+// ─── Type Erasure Problem and Its Solution ───────────────────────────────────
 //
-// When `Field<M, R>` is stored in `List<Field<M, Object?>>` (aliased as
-// `ListFieldOf`), the specific type `R` is erased. Calling `field.serializer`
-// through an erased reference throws at runtime: Dart checks function-type
-// compatibility contravariantly in parameters, so `(DateTime) → String` is
-// NOT a subtype of `(Object?) → Object?`.
+// When `Field<M, R>` is stored in `List<Field<M, Object?>>`, the specific
+// type `R` is erased. Accessing `field.serializer` through an erased reference
+// throws a `_TypeError` at runtime: Dart checks function type compatibility
+// (contravariant in parameters), so `(DateTime) → String` is NOT a
+// subtype of `(Object?) → Object?`.
 //
-// The fix: build a type-erased wrapper once, in the constructor —
+// Solution: create a type-erased wrapper once in the constructor:
 //   _erased = (Object? v) => serializer(v as R)
-// — which accepts `Object?` and stays safe at any level of erasure. Use
-// [hasSerializer] + [serializeErased] wherever the field is stored as
-// `Field<M, Object?>`.
 //
-// ─── Why isn't there a "name" you can look a field up by? ───────────────────
-//
-// There used to be — an earlier version of this package indexed fields by
-// a Dart-facing `name` for `copyWith`, so call sites read `$['title']`. It
-// was dropped in favor of plain Dart Records (see `ModelType.bind`'s doc
-// comment): a Record gives `$.title` directly, fully checked at compile
-// time, for free, with no lookup table and no string at the call site at
-// all. `fieldName` below still exists, but purely for nicer error messages
-// — it has no bearing on how a field is reached for `copyWith` anymore.
+// The wrapper accepts `Object?` and is safe at any level of erasure.
+// Use [hasSerializer] + [serializeErased] wherever the field is stored
+// as `Field<M, Object?>`.
 // =============================================================================
 
+import 'field_patch.dart';
 import 'types.dart';
 
 /// Descriptor that binds a single JSON key to a typed Dart property.
+///
+/// ### Fields
+/// - [jsonKey]    — key in the JSON object.
+/// - [nesting]    — list of ancestor keys for nested access via `at(...)`.
+/// - [parser]     — converts a raw JSON value to [R].
+/// - [nullable]   — whether the field allows a null value.
+/// - [serializer] — custom serializer (optional).
 final class Field<M, R> {
   Field({
     required this.jsonKey,
-    required this.fieldName,
     required this.nesting,
-    required this.getter,
     required this.parser,
-    bool? nullable,
+    this.nullable = false,
     Serializer<R>? serializer,
-  }) : nullable = nullable ?? (null is R),
-       serializer = serializer,
-       // Build the type-erased wrapper once, up front.
+  }) : serializer = serializer,
+       // Create a type-erased wrapper once during initialization.
+       // This allows safely calling the serializer through an erased type.
        _erased = serializer == null
            ? null
            : ((Object? v) => serializer(v as R));
@@ -53,74 +50,86 @@ final class Field<M, R> {
   /// Key in the JSON object (e.g., `"user_id"`, `"created_at"`).
   final String jsonKey;
 
-  /// A friendlier name to use in error messages, in place of [jsonKey].
+  /// List of ancestor keys for fields with nested access.
   ///
-  /// Defaults to [jsonKey] — pass it only when the JSON key itself wouldn't
-  /// read well in a `RequiredFieldError`/`TypeConversionError` message:
-  /// ```dart
-  /// 'created_at'.field((m) => m.createdAt, name: 'createdAt')
-  /// ```
-  /// Purely cosmetic: it isn't used to look the field up for `copyWith` (see
-  /// the file header above) or anywhere else that affects behavior.
-  final String fieldName;
-
-  /// Ancestor keys for fields with nested access via `at(...)`.
+  /// Empty for top-level fields. Populated when using `at(...)`.
   ///
-  /// Empty for top-level fields. Example: for
-  /// `'count'.field(getter, parser: at('meta', intOrZero))` the nesting is
-  /// `['meta']`, and the full read path is `json['meta']['count']`.
+  /// Example: for `'count'.field(parser: at('meta', intOrZero))` the nesting
+  /// will be `['meta']`, and the full read path is `json['meta']['count']`.
   final List<String> nesting;
 
-  /// Extracts the typed value from a model instance [M].
+  /// Parses a raw JSON value, producing a value of type [R] — or `null`
+  /// when the value is absent or couldn't be parsed.
   ///
-  /// Accepts `Object?` (instead of `M`) so it keeps working once the field
-  /// is stored in an erased `Field<M, Object?>` list.
-  final R Function(Object? model) getter;
+  /// `null` is returned as-is here, never cast to [R]: whether a `null`
+  /// result is acceptable for this field is decided by
+  /// [SerializableHelpers.fromJson], based on [nullable] — not by this
+  /// closure. May still throw [SerializationError] (or a subclass) for
+  /// genuinely malformed input.
+  final Parser<Object?> parser;
 
-  /// Parses a raw JSON value.
+  /// Whether this field allows a null value.
   ///
-  /// Returns a value of type [R], or `null` when the raw value couldn't be
-  /// parsed (missing key, wrong shape, ...). That `null` is *not* a final
-  /// verdict — `SerializableHelpers.fromJson` is the single place that
-  /// decides whether it's acceptable, based on [nullable]. Throw a
-  /// `SerializationError` (or subclass) for genuinely unrecoverable input.
-  ///
-  /// Declared as `Object? Function(Object?)` rather than `R Function(Object?)`
-  /// on purpose: it must be able to return `null` even when [R] itself is a
-  /// non-nullable type, without an unsound `null as R` cast.
-  final Object? Function(Object? jsonValue) parser;
-
-  /// Whether this field accepts a `null` value from JSON.
-  ///
-  /// `true`  — `null` is a valid result.
-  /// `false` — a `null` parse result throws `RequiredFieldError`.
-  ///
-  /// Defaults to `null is R` when not given explicitly, so a field typed
-  /// `String?` is optional out of the box and a field typed `String` is
-  /// required out of the box — matching what the Dart type already says.
-  /// Pass it explicitly only to override that default.
+  /// If `true` — null from JSON is considered valid.
+  /// If `false` — null will throw [RequiredFieldError].
   final bool nullable;
 
   /// Typed serializer.
   ///
-  /// Safe only when [R] is known at compile time. Use [serializeErased] when
-  /// the type has been erased.
+  /// Safe only when [R] is known at compile time.
+  /// Use [serializeErased] when the type is erased.
   final Serializer<R>? serializer;
 
-  // Type-erased wrapper, built once in the constructor.
+  // Type-erased wrapper created once in the constructor.
+  // Accepts Object? and casts to R via `as R` inside.
   final Serializer<Object?>? _erased;
 
-  /// `true` if a custom serializer is attached to this field.
+  /// `true` if a custom serializer is attached to the field.
   bool get hasSerializer => _erased != null;
 
   /// Serializes [value] via the type-erased wrapper.
   ///
-  /// Safe at any level of type erasure. Call only after checking
-  /// [hasSerializer].
+  /// Safe at any level of type erasure.
+  /// Call only after checking [hasSerializer].
   Object? serializeErased(Object? value) => _erased!(value);
 
-  @override
-  String toString() =>
-      'Field<$M, $R>(jsonKey: $jsonKey, fieldName: $fieldName, '
-      'nullable: $nullable, nesting: $nesting)';
+  // ── Value bound to a specific instance ───────────────────────────
+  // A field is shared across all model instances — a regular variable
+  // cannot be used here (see the demonstration above). Expando binds
+  // the value to the OBJECT, not to the class: sensor1 and sensor2
+  // have different storage cells. The key is a weak reference, so the
+  // instance GC automatically clears the entry, preventing memory leaks.
+  final Expando<Object> _cache = Expando<Object>();
+
+  /// Called once from `fromJson`, immediately after `Function.apply` builds
+  /// the instance — "associates" the value it just parsed with that
+  /// specific [instance]. It does not read anything off the instance
+  /// itself; the value is exactly what the parser already computed.
+  ///
+  /// This is also why [readErased] (and, through it, `toJson()`/`props`)
+  /// only reflects real field values for instances built via `fromJson` or
+  /// `copyWith` — both call this for every field. An instance built by
+  /// calling the model's constructor directly was never `attach`ed to, so
+  /// [readErased] returns `null` for each of its fields.
+  void attach(Object instance, R value) => _cache[instance] = value;
+
+  /// Retrieves the cached value for the [instance].
+  Object? readErased(Object instance) => _cache[instance];
+}
+
+// =============================================================================
+// FieldPatchX — Field extension for creating a patch
+// =============================================================================
+
+extension FieldPatchX<M, R> on Field<M, R> {
+  /// Creates a [FieldPatch] for this field with the given value.
+  ///
+  /// Usage:
+  /// ```dart
+  /// model.copyWith(($) => [
+  ///   $.price.set(9.99),
+  ///   $.title.set('New title'),
+  /// ]);
+  /// ```
+  FieldPatch set(R value) => FieldPatch(jsonKey, nesting, value);
 }

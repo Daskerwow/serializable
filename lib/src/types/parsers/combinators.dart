@@ -10,7 +10,7 @@ import '../types.dart';
 /// Lifts a non-nullable serializer to the nullable level.
 ///
 /// ```dart
-/// 'ts'.field((m) => m.ts, serializer: nullable(dateTimeToJson))
+/// 'ts'.field<M, DateTime?>(serializer: nullable(dateTimeToJson))
 /// ```
 @pragma('vm:prefer-inline')
 Serializer<T?> nullable<T>(Serializer<T> s) => (v) => v == null ? null : s(v);

@@ -10,36 +10,35 @@ and Flutter — type-safe fields, smart type conversion, and immutable
 import 'package:equatable/equatable.dart';
 import 'package:json_forge/json_forge.dart';
 
-// A named Record listing each field by its Dart-facing name. This is what
-// makes `copyWith` below read `$.value.set(...)` with no string keys and
-// no reflection — `$.value` is a native, compile-time-checked Record access.
-typedef SensorFields = ({
-  Field<Sensor, String> uid,
-  Field<Sensor, double> value,
-});
-
 class Sensor extends Equatable with Serializable<Sensor> {
   const Sensor(this.uid, this.value);
 
   final String uid;
   final double value;
 
-  static final SensorFields _fields = (
-    uid: 'sensor_uid'.field((m) => m.uid),
-    value: 'last_value'.field((m) => m.value, parser: doubleOrZero),
-  );
-
   // M is always explicit — Dart can't infer it from a positional
   // constructor. This order is what `Function.apply` uses internally, so
-  // it must match the constructor parameter order above.
-  static final $ = ModelType<Sensor>(Sensor.new, [_fields.uid, _fields.value]);
+  // `SensorSchema.all` must list fields in this same order.
+  static final $ = ModelType<Sensor, SensorSchema>(Sensor.new, SensorSchema());
 
   @override
-  ListFieldOf<Sensor> get fields => $.all;
+  ListFieldOf<Sensor> get fields => $.schema.all;
 
   factory Sensor.fromJson(Json json) => $.call(json);
 
-  late final copyWith = $.bind(this, _fields);
+  late final copyWith = $.bind(this);
+}
+
+// A class you extend, declaring each field once as a member. This is what
+// makes `copyWith` below read `$.value.set(...)` with no string keys and
+// no reflection — `$.value` is a real, compile-time-checked member access.
+// `all` doubles as the ordered field list `fromJson` needs.
+final class SensorSchema extends Schema<Sensor> {
+  late final uid = field<String>('sensor_uid');
+  late final value = field<double>('last_value');
+
+  @override
+  late final all = [uid, value];
 }
 
 void main() {
@@ -50,54 +49,63 @@ void main() {
 ```
 
 No `.g.dart` files, no `build_runner` step — `toJson`, `fromJson`, `==`/
-`hashCode` (via `Equatable`), and `copyWith` are all derived from `_fields`
-and the order list above.
+`hashCode` (via `Equatable`), and `copyWith` are all derived from
+`SensorSchema` above.
 
-## Why a Record, and not a string key or `Symbol`?
+> **Always construct via `fromJson` or `copyWith`.** A field's value is
+> cached against an instance the moment `fromJson` parses it — `toJson()`
+> and `==` read that cache back, rather than calling a getter. Building a
+> `Sensor` by calling its constructor directly works for the constructor's
+> own purpose (it's what `ModelType` invokes via `Function.apply`), but
+> `toJson()`/`==` on such an instance won't reflect the values you passed
+> in. See `Field.attach` in the source for the mechanism.
 
-`copyWith`'s builder needs _some_ way to give you back the right `Field`
+## Why a `Schema` class, and not a string key, `Symbol`, or Record?
+
+`copyWith`'s builder needs *some* way to give you back the right `Field`
 object for a given model property — `$.title`, ideally, not `$['title']`.
-There's no codegen-free way to ask Dart "what property does `(m) => m.title`
-read?": closures don't expose that at runtime, and the one tool that could
-in principle inspect it (`dart:mirrors`, by walking the AST) isn't available
-on Flutter/AOT in the first place.
+There's no codegen-free way to ask Dart "what property does this model
+expose under this name?": Dart has no runtime reflection on Flutter/AOT
+(`dart:mirrors` isn't available there), so the engine can't discover field
+names on its own — they have to be declared, once, somewhere.
 
 A `String` key (`$['title']`) works, but a typo surfaces as a runtime
-`ArgumentError` instead of a compile error. A `Symbol` (`$[#title]`) doesn't
-actually improve on that: a `Symbol` literal isn't checked against any real
-declaration either — `#tiel` "compiles" exactly as readily as `'tiel'`
-would — and `Symbol`/reflection-based dispatch generally isn't safe under
-`dart compile exe --obfuscate` (identifiers get renamed; `Symbol` literals
-built from strings don't reliably follow along), which is also why this
-package never uses named-argument `Function.apply` dispatch internally.
+`ArgumentError` instead of a compile error. A `Symbol` (`$[#title]`)
+doesn't actually improve on that either — a `Symbol` literal isn't checked
+against any real declaration (`#tiel` "compiles" exactly as readily as
+`'tiel'` would), and `Symbol`/reflection-based dispatch generally isn't
+safe under `dart compile exe --obfuscate`, which is also why this package
+never uses named-argument `Function.apply` dispatch internally. A Dart
+*Record* is another option (and is what earlier versions of this package
+used — see the CHANGELOG) — but it's a second declaration to keep in sync
+with the field list `ModelType` actually needs.
 
-A plain Dart **Record** sidesteps all of this. `$.title` on a Record is
-resolved by the analyzer like any other member access — a typo is a
-compile error, the value type is checked, and there's no string, no lookup
-table, and no obfuscation risk anywhere in the path. The cost is exactly
-one declaration: list each field once, by name, in a Record literal. That's
-the same amount of naming you'd do for any per-field property — it's just
-expressed as Record fields instead of class members, and it drops the
-abstract-class ceremony that used to come with it.
+Declaring each field as a real member of a class — `late final title =
+field<String>('display_name');` on a class extending `Schema<M>` — gets
+the same compiler guarantees a Record does (`$.title` is resolved by the
+analyzer like any other member access; a typo is a compile error, not a
+runtime one), while also being the field list itself: the schema's
+required `all` getter *is* the ordered list `ModelType` feeds into
+`fromJson`. One declaration covers both `fromJson`/`toJson` and type-safe
+`copyWith` — there's no separate Record `typedef` to keep matching it.
 
 ## The pieces
 
-- **`Field<M, R>`** — a descriptor binding one JSON key to one Dart
-  property: how to read it off the model (`getter`), how to parse it from
+- **`Field<M, R>`** — a descriptor for one JSON key: how to parse it from
   JSON (`parser`), whether `null` is acceptable (`nullable`, defaulting to
-  `null is R`), and an optional custom `serializer`.
-- **A `static final` list of `Field`s, in constructor-parameter order** —
-  the one thing every model needs. Fed straight into `ModelType`, this
-  alone is enough for `fromJson`/`toJson`; nothing else is required if a
-  model doesn't need `copyWith`.
-- **A named Record (optional)** — only needed for type-safe `copyWith`.
-  Give each field a name there; `ModelType.bind` hands that Record to your
-  `copyWith` builder as `$`.
-- **`ModelType<M>`** — binds the ordered list to the model's constructor;
-  the engine behind `fromJson` (and what `toJson`/`props` iterate, via
-  `Serializable`).
+  `null is R`), and an optional custom `serializer`. It does *not* hold a
+  getter — see the "Always construct via `fromJson`" note above.
+- **`Schema<M>`** — a class you extend, declaring each field once as a
+  `late final` member via `field<R>(jsonKey, ...)`. The required `all`
+  getter lists every field **in constructor-parameter order** — the one
+  thing every model needs, fed straight into `ModelType`. Skip naming
+  individual fields (just fill in `all` directly) if a model doesn't need
+  `copyWith` — see "Minimal" below.
+- **`ModelType<M, S>`** — binds a `Schema` instance to the model's
+  constructor; the engine behind `fromJson` (and what `toJson`/`props`
+  iterate, via `Serializable`).
 - **`ModelBinder<M, S>`** — what `ModelType.bind` returns; a stored,
-  callable `copyWith`, generic over whatever schema (`S`) you handed it.
+  callable `copyWith`, generic over whatever `Schema` (`S`) you handed it.
 
 ### Minimal — no `copyWith`
 
@@ -108,36 +116,47 @@ class Gadget extends Equatable with Serializable<Gadget> {
   final String uid;
   final double reading;
 
-  static final $ = ModelType<Gadget>(Gadget.new, [
-    'gadget_uid'.field<Gadget, String>((m) => m.uid),
-    'reading'.field((m) => m.reading, parser: doubleOrZero),
-  ]);
+  static final $ = ModelType<Gadget, GadgetSchema>(Gadget.new, GadgetSchema());
 
   @override
-  ListFieldOf<Gadget> get fields => $.all;
+  ListFieldOf<Gadget> get fields => $.schema.all;
 
   static Gadget fromJson(Json json) => $.call(json);
 }
+
+final class GadgetSchema extends Schema<Gadget> {
+  @override
+  late final all = [
+    'gadget_uid'.field<Gadget, String>(),
+    'reading'.field<Gadget, double>(parser: doubleOrZero),
+  ];
+}
 ```
 
-No Record, no `copyWith` — just `fromJson`/`toJson`. Add a Record (as in
-the Quick start above) only once you actually want type-safe `copyWith`.
+No named per-field members, no `copyWith` — just `fromJson`/`toJson`, via
+the top-level `.field()` string extension straight inside `all`. Give
+fields names (as in the Quick start above) only once you actually want
+type-safe `copyWith`.
 
 ### Decoupling the wire format from `copyWith` call sites
 
-A Record's field name and a field's `jsonKey` are independent by
-construction — no extra parameter needed to keep them that way:
+A field's Dart-facing name (its member name on the `Schema`) and its
+`jsonKey` are independent by construction — no extra parameter needed to
+keep them that way:
 
 ```dart
-typedef TerminalFields = ({
-  Field<Terminal, String> title,
-  Field<Terminal, DeviceStatus> status,
-});
+final class TerminalSchema extends Schema<Terminal> {
+  late final title = field('display_name', parser: stringOrDefault('Unnamed'));
+  late final status = field(
+    'device_status',
+    parser: enumOrFirst(DeviceStatus.values),
+    serializer: enumToJson,
+  );
+  // ...
 
-static final TerminalFields _fields = (
-  title: 'display_name'.field((m) => m.title, parser: ...),
-  status: 'device_status'.field(..., serializer: enumToJson),
-);
+  @override
+  late final all = [title, status /* , ... */];
+}
 
 terminal.copyWith(($) => [
   $.title.set('ZONE_B'),
@@ -146,20 +165,20 @@ terminal.copyWith(($) => [
 ```
 
 If the wire format changes (`display_name` → `name`), every `copyWith`
-call site above is untouched — only the one line declaring `_fields` needs
-to change.
+call site above is untouched — only the one line declaring `title` inside
+`TerminalSchema` needs to change.
 
 ## Field nullability
 
-`nullable` defaults to `null is R` — a field typed `String?` is optional out
-of the box, a field typed `String` is required out of the box:
+`nullable` defaults to `null is R` — a field typed `String?` is optional
+out of the box, a field typed `String` is required out of the box:
 
 ```dart
 // Optional, no extra flag needed:
-'address'.field<User, Address?>((m) => m.address, parser: modelOrNull(Address.fromJson));
+'address'.field<User, Address?>(parser: modelOrNull(Address.fromJson));
 
 // Required by default (R is non-nullable):
-'name'.field<User, String>((m) => m.name);
+'name'.field<User, String>();
 ```
 
 Pass `nullable:` explicitly only to override that default.
@@ -167,11 +186,13 @@ Pass `nullable:` explicitly only to override that default.
 ## Nested JSON paths
 
 ```dart
-'count'.field((m) => m.count, parser: at('meta', intOrZero)); // json['meta']['count']
+// Inside a Schema<M> subclass:
+late final count = field<int>('count', parser: at('meta', intOrZero));
+// reads json['meta']['count']
 ```
 
-`at` only _records_ the path (used to read/write the value); the parser you
-wrap still receives the already-resolved leaf value.
+`at` only _records_ the path (used to read/write the value); the parser
+you wrap still receives the already-resolved leaf value.
 
 ## Errors
 
@@ -193,7 +214,7 @@ lib/
       types.dart               shared typedefs (Json, Parser, Serializer, ...)
       field.dart                Field<M, R>
       field_patch.dart          FieldPatch + Field.set()
-      model_type.dart           ModelType + ModelBinder
+      model_type.dart           Schema<M> + ModelType + ModelBinder
       parser.dart               barrel for parsers/
       parsers/
         primitives.dart         String, int, double, num, bool, BigInt, Uri

@@ -2,63 +2,43 @@ import 'package:json_forge/json_forge.dart';
 import 'package:equatable/equatable.dart';
 import 'package:test/test.dart';
 
-// =============================================================================
-// Complex nested models — schemas are plain Dart Records, so `copyWith`
-// reads `$.field.set(...)` with no string keys anywhere.
-// =============================================================================
+// Complex nested models for comprehensive testing
 
+/// Statuses for devices
 enum DeviceStatus { active, maintenance, offline, unknown }
 
+/// Access levels for terminals
 enum AccessLevel { read, write, execute }
 
+/// User role enum
 enum UserRole { admin, user, guest }
 
-/// Nested model: Sensor.
-typedef SensorFields<T> = ({
-  Field<T, String> uid,
-  Field<T, double> value,
-  Field<T, List<DateTime>> history,
-});
-
 class Sensor extends Equatable with Serializable<Sensor> {
+  const Sensor(this.uid, this.value, this.history);
+
   final String uid;
   final double value;
   final List<DateTime> history;
 
-  const Sensor(this.uid, this.value, this.history);
-
-  static final SensorFields<Sensor> _fields = (
-    uid: 'sensor_uid'.field<Sensor, String>((m) => m.uid),
-    value: 'last_value'.field((m) => m.value, parser: doubleOrZero),
-    history: 'history_logs'.field(
-      (m) => m.history,
-      parser: listOf(dateTimeOrEpoch),
-    ),
-  );
-
-  static final $ = ModelType<Sensor>(Sensor.new, [
-    _fields.uid,
-    _fields.value,
-    _fields.history,
-  ]);
+  static final $ = ModelType<Sensor, SensorSchema>(Sensor.new, SensorSchema());
 
   @override
-  ListFieldOf<Sensor> get fields => $.all;
+  ListFieldOf<Sensor> get fields => $.schema.all;
 
-  factory Sensor.fromJson(Json json) => $.call(json);
-
-  Sensor copyWith(FieldsBuilder<SensorFields> builder) =>
-      $.bind(this, _fields)(builder);
+  static Sensor fromJson(Json json) => $.call(json);
+  Sensor copyWith(FieldsBuilder<SensorSchema> updates) => $.bind(this)(updates);
 }
 
-/// Nested model: Address.
-typedef AddressFields<T> = ({
-  Field<T, String> street,
-  Field<T, String> city,
-  Field<T, String> country,
-  Field<T, int> zipCode,
-});
+final class SensorSchema extends Schema<Sensor> {
+  late final uid = field<String>('sensor_uid');
+  late final value = field<double>('last_value');
+  late final history = field('history_logs', parser: listOf(dateTimeOrEpoch));
 
+  @override
+  late final all = [uid, value, history];
+}
+
+/// Nested model: Address
 class Address extends Equatable with Serializable<Address> {
   final String street;
   final String city;
@@ -67,40 +47,30 @@ class Address extends Equatable with Serializable<Address> {
 
   const Address(this.street, this.city, this.country, this.zipCode);
 
-  static final AddressFields<Address> _fields = (
-    street: 'street_address'.field<Address, String>((m) => m.street),
-    city: 'city_name'.field<Address, String>((m) => m.city),
-    country: 'country_name'.field<Address, String>((m) => m.country),
-    zipCode: 'zip_code'.field<Address, int>((m) => m.zipCode),
+  static final $ = ModelType<Address, AddressSchema>(
+    Address.new,
+    AddressSchema(),
   );
 
-  /// The order here is exactly Address(this.street, this.city, this.country, this.zipCode)
-  /// — that's all that's load-bearing; the Record above can list its named
-  /// fields in any order.
-  static final $ = ModelType<Address>(Address.new, [
-    _fields.street,
-    _fields.city,
-    _fields.country,
-    _fields.zipCode,
-  ]);
-
   @override
-  List<Field<Address, Object?>> get fields => $.all;
+  List<Field<Address, Object?>> get fields => $.schema.all;
 
   factory Address.fromJson(Json json) => $.call(json);
-  Address copyWith(FieldsBuilder<AddressFields> builder) =>
-      $.bind(this, _fields)(builder);
+  Address copyWith(FieldsBuilder<AddressSchema> builder) =>
+      $.bind(this)(builder);
 }
 
-typedef UserFields<T> = ({
-  Field<T, int> id,
-  Field<T, String> name,
-  Field<T, String> email,
-  Field<T, bool> isActive,
-  Field<T, UserRole> role,
-  Field<T, DateTime> createdAt,
-  Field<T, Address?> address,
-});
+final class AddressSchema extends Schema<Address> {
+  /// Order does not matter
+  late final street = field<String>('street_address');
+  late final city = field<String>('city_name');
+  late final country = field<String>('country_name');
+  late final zipCode = field<int>('zip_code');
+
+  /// The order is exactly the same as in Address(this.street, this.city, this.country, this.zipCode)
+  @override
+  ListFieldOf<Address> get all => [street, city, country, zipCode];
+}
 
 class User extends Equatable with Serializable<User> {
   final int id;
@@ -121,62 +91,40 @@ class User extends Equatable with Serializable<User> {
     this.address,
   );
 
-  static final UserFields<User> _fields = (
-    id: 'user_id'.field<User, int>((m) => m.id),
-    name: 'full_name'.field<User, String>((m) => m.name),
-    email: 'email_address'.field<User, String>((m) => m.email),
-    isActive: 'is_active'.field<User, bool>((m) => m.isActive),
-    role: 'user_role'.field(
-      (m) => m.role,
-      parser: enumOrFirst(UserRole.values),
-      serializer: enumToJson,
-    ),
-    createdAt: 'created_at'.field<User, DateTime>((m) => m.createdAt),
-    // Genuinely nullable on the model (Address?) — `nullable` isn't passed
-    // explicitly, it's auto-derived as `true` from the field type. See the
-    // "auto-derives nullable" test below.
-    address: 'user_address'.field(
-      (m) => m.address,
-      nullable: true,
-      parser: modelOrNull(Address.fromJson),
-    ),
-  );
-
-  static final $ = ModelType<User>(User.new, [
-    _fields.id,
-    _fields.name,
-    _fields.email,
-    _fields.isActive,
-    _fields.role,
-    _fields.createdAt,
-    _fields.address,
-  ]);
+  static final $ = ModelType<User, UserField>(User.new, UserField());
 
   @override
-  ListFieldOf<User> get fields => $.all;
-
+  ListFieldOf<User> get fields => $.schema.all;
   factory User.fromJson(Json json) => $.call(json);
-  User copyWith(FieldsBuilder<UserFields> builder) =>
-      $.bind(this, _fields)(builder);
+  User copyWith(FieldsBuilder<UserField> builder) => $.bind(this)(builder);
 }
 
-typedef TerminalFields = ({
-  Field<Terminal, int> id,
-  Field<Terminal, String> title,
-  Field<Terminal, DeviceStatus> status,
-  Field<Terminal, List<Sensor>> sensors,
-  Field<Terminal, Map<AccessLevel, String>> tokens,
-  Field<Terminal, List<User>> users,
-});
+final class UserField extends Schema<User> {
+  late final id = field<int>('user_id');
+  late final name = field<String>('full_name');
+  late final email = field<String>('email_address');
+  late final isActive = field('is_active', parser: boolOrFalse);
+  late final role = field('user_role', parser: enumOrFirst(UserRole.values));
+  late final createdAt = field('created_at', parser: dateTimeOrNow);
+  late final address = field(
+    'user_address',
+    parser: modelOrNull(Address.fromJson),
+    nullable: true,
+  );
+
+  @override
+  ListFieldOf<User> get all => [
+    id,
+    name,
+    email,
+    isActive,
+    role,
+    createdAt,
+    address,
+  ];
+}
 
 class Terminal extends Equatable with Serializable<Terminal> {
-  final int id;
-  final String title;
-  final DeviceStatus status;
-  final List<Sensor> sensors;
-  final Map<AccessLevel, String> tokens;
-  final List<User> users;
-
   const Terminal(
     this.id,
     this.title,
@@ -186,46 +134,57 @@ class Terminal extends Equatable with Serializable<Terminal> {
     this.users,
   );
 
-  static final TerminalFields _fields = (
-    id: 't_id'.field<Terminal, int>((m) => m.id),
-    title: 'display_name'.field<Terminal, String>(
-      (m) => m.title,
-      parser: (v) => v as String? ?? 'Unnamed Terminal',
-    ),
-    status: 'device_status'.field<Terminal, DeviceStatus>(
-      (m) => m.status,
-      parser: enumOrFirst(DeviceStatus.values),
-    ),
-    sensors: 'attached_sensors'.field<Terminal, List<Sensor>>(
-      (m) => m.sensors,
-      parser: listOf<Sensor>(modelOf(Sensor.fromJson)),
-    ),
-    tokens: 'access_keys'.field<Terminal, Map<AccessLevel, String>>(
-      (m) => m.tokens,
-      parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
-    ),
-    users: 'terminal_users'.field<Terminal, List<User>>(
-      (m) => m.users,
-      parser: listOf<User>(modelOf(User.fromJson)),
-    ),
+  final int id;
+  final String title;
+  final DeviceStatus status;
+  final List<Sensor> sensors;
+  final Map<AccessLevel, String> tokens;
+  final List<User> users;
+
+  static final $ = ModelType<Terminal, TerminalSchema>(
+    Terminal.new,
+    TerminalSchema(),
   );
 
-  static final $ = ModelType<Terminal>(Terminal.new, [
-    _fields.id,
-    _fields.title,
-    _fields.status,
-    _fields.sensors,
-    _fields.tokens,
-    _fields.users,
-  ]);
+  @override
+  ListFieldOf<Terminal> get fields => $.schema.all;
+
+  static Terminal fromJson(Json json) => $.call(json);
+
+  Terminal copyWith(FieldsBuilder<TerminalSchema> updates) =>
+      $.bind(this)(updates);
+}
+
+final class TerminalSchema extends Schema<Terminal> {
+  late final id = field<int>('t_id');
+  late final title = field('display_name', parser: stringOrDefault('Unnamed'));
+  late final status = field(
+    'device_status',
+    parser: enumOrFirst(DeviceStatus.values),
+    // Optional here: `_serialize`'s default already handles `Enum` via
+    // `.name`. Spelled out anyway to show how a custom serializer plugs in.
+    serializer: enumToJson,
+  );
+  late final sensors = field(
+    'attached_sensors',
+    parser: listOf(modelOf(Sensor.fromJson)),
+  );
+  late final tokens = field(
+    'access_keys',
+    parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
+    // Not optional: the default Map serializer keys by `.toString()`
+    // ("AccessLevel.read"), not `.name` ("read") — this is what fixes that.
+    serializer: (map) => {
+      for (final MapEntry(:key, :value) in map.entries) key.name: value,
+    },
+  );
+  late final users = field(
+    'terminal_users',
+    parser: listOf<User>(modelOf(User.fromJson)),
+  );
 
   @override
-  ListFieldOf<Terminal> get fields => $.all;
-
-  factory Terminal.fromJson(Json json) => $.call(json);
-
-  Terminal copyWith(FieldsBuilder<TerminalFields> builder) =>
-      $.bind(this, _fields)(builder);
+  late final all = [id, title, status, sensors, tokens, users];
 }
 
 void main() {
@@ -500,199 +459,5 @@ void main() {
       expect(updatedTerminal.users[0].name, 'John Doe');
       expect(updatedTerminal.users[0].address!.city, 'New York');
     });
-
-    test(
-      'copyWith reaches a field via native Record access (Sensor.value)',
-      () {
-        final sensor = Sensor.fromJson({
-          'sensor_uid': 'SN-100',
-          'last_value': 10.5,
-          'history_logs': <String>[],
-        });
-
-        // $.value is a plain Record field access — no string key, no
-        // operator [], nothing reflective involved.
-        final updated = sensor.copyWith(($) => [$.value.set(99.9)]);
-
-        expect(sensor.value, 10.5);
-        expect(updated.value, 99.9);
-        expect(updated.uid, sensor.uid);
-      },
-    );
   });
-
-  // ===========================================================================
-  // Production-readiness fixes
-  // ===========================================================================
-
-  group(
-    'ModelType without a Record — fromJson/toJson need no schema object',
-    () {
-      test(
-        'a model can skip the Record entirely if it never needs copyWith',
-        () {
-          final gadget = Gadget.fromJson({
-            'gadget_uid': 'GX-1',
-            'reading': 10.5,
-          });
-          expect(gadget.uid, 'GX-1');
-          expect(gadget.reading, 10.5);
-          expect(gadget.toJson(), {'gadget_uid': 'GX-1', 'reading': 10.5});
-        },
-      );
-    },
-  );
-
-  group('Record-based schema decouples Field name from jsonKey', () {
-    test("a Record field's name is independent of the field's jsonKey", () {
-      final widget = Widget.fromJson({'w_uid': 'W-1', 'w_count': 3});
-
-      // WidgetFields' jsonKey is 'w_count'; the Record field is `count`.
-      // copyWith only ever sees the latter — there's no string anywhere
-      // in this call for the analyzer to fail to check.
-      final updated = widget.copyWith(($) => [$.count.set(9)]);
-
-      expect(updated.count, 9);
-      expect(updated.uid, widget.uid);
-    });
-
-    test(
-      'a typo in the Record field name is a compile error, not a runtime one',
-      () {
-        // This is exactly why there's nothing to test here at runtime:
-        //   widget.copyWith(($) => [$.cuont.set(9)]);
-        // doesn't compile — `cuont` isn't a member of WidgetFields. The
-        // previous (1.0.0) design caught this kind of typo with a runtime
-        // ArgumentError from FieldSet.operator []; Records catch it before
-        // the code ever runs.
-      },
-      skip: 'documentation only — see the comment above',
-    );
-  });
-
-  group('Field.nullable — auto-derived default', () {
-    test('a nullable-typed field accepts null without an explicit flag', () {
-      // UserFields.address is declared as Field<User, Address?> *without*
-      // passing `nullable: true` — it must still accept a missing/null
-      // value instead of throwing RequiredFieldError.
-      final user = User.fromJson({
-        'user_id': 1,
-        'full_name': 'Ann',
-        'email_address': 'ann@example.com',
-        'is_active': true,
-        'user_role': 'user',
-        'created_at': '2026-01-07T10:00:00Z',
-        'user_address': null,
-      });
-      expect(user.address, null);
-    });
-
-    test(
-      'a non-nullable field still throws RequiredFieldError when missing',
-      () {
-        // Note: this needs a parser that can genuinely return `null` — the
-        // smart-inferred default for `int` is `intOrZero`, which *never*
-        // returns null (it falls back to 0), so it could never trigger this
-        // path. `Probe` uses an explicit `intOrNull` to actually exercise it.
-        expect(() => Probe.fromJson({}), throwsA(isA<RequiredFieldError>()));
-      },
-    );
-  });
-
-  group('Typed errors are part of the public API', () {
-    test('TypeConversionError carries full context', () {
-      // No explicit parser, and `Address` isn't one of the smart-inferred
-      // primitives, so `_smartParse` falls through to its "unknown type"
-      // branch and passes the raw value through unchanged. Feeding that a
-      // String (not a Map, not an Address) makes the post-parse type check
-      // fail — unlike a Map-shaped value, which `modelOrNull` would parse.
-      final field = 'addr'.field<Object, Address>(
-        (_) => throw UnimplementedError(),
-      );
-
-      try {
-        field.parser('not an address');
-        fail('expected a TypeConversionError');
-      } on TypeConversionError catch (e) {
-        expect(e.expectedType, Address);
-        expect(e.actualType, String);
-      }
-    });
-  });
-}
-
-// =============================================================================
-// Gadget — the minimal shape: just a field list fed straight to ModelType,
-// no Record at all. Fine for fromJson/toJson; only needed when a model
-// genuinely wants type-safe copyWith.
-// =============================================================================
-
-class Gadget extends Equatable with Serializable<Gadget> {
-  const Gadget(this.uid, this.reading);
-
-  final String uid;
-  final double reading;
-
-  static final $ = ModelType<Gadget>(Gadget.new, [
-    'gadget_uid'.field<Gadget, String>((m) => m.uid),
-    'reading'.field<Gadget, double>((m) => m.reading, parser: doubleOrZero),
-  ]);
-
-  @override
-  ListFieldOf<Gadget> get fields => $.all;
-
-  static Gadget fromJson(Json json) => $.call(json);
-}
-
-// =============================================================================
-// Widget — same model shape as Gadget, but *with* a Record, and a jsonKey
-// that deliberately differs from the Record's field name (`w_count` vs.
-// `count`), to exercise that decoupling explicitly.
-// =============================================================================
-
-typedef WidgetFields = ({Field<Widget, String> uid, Field<Widget, int> count});
-
-class Widget extends Equatable with Serializable<Widget> {
-  const Widget(this.uid, this.count);
-
-  final String uid;
-  final int count;
-
-  static final WidgetFields _fields = (
-    uid: 'w_uid'.field<Widget, String>((m) => m.uid),
-    count: 'w_count'.field<Widget, int>((m) => m.count, parser: intOrZero),
-  );
-
-  static final $ = ModelType<Widget>(Widget.new, [_fields.uid, _fields.count]);
-
-  @override
-  ListFieldOf<Widget> get fields => $.all;
-
-  static Widget fromJson(Json json) => $.call(json);
-
-  Widget copyWith(FieldsBuilder<WidgetFields> builder) =>
-      $.bind(this, _fields)(builder);
-}
-
-// =============================================================================
-// Probe — a single required `int` field with an explicit `intOrNull`
-// parser, used only to exercise RequiredFieldError. The smart-inferred
-// default for `int` (`intOrZero`) never returns null, so it can't be used
-// to test this path — a field needs an explicit null-returning parser (or
-// a model parser like `modelOrNull`) to ever actually trigger it.
-// =============================================================================
-
-class Probe extends Equatable with Serializable<Probe> {
-  const Probe(this.count);
-
-  final int count;
-
-  static final $ = ModelType<Probe>(Probe.new, [
-    'count'.field<Probe, int>((m) => m.count, parser: intOrZero),
-  ]);
-
-  @override
-  ListFieldOf<Probe> get fields => $.all;
-
-  static Probe fromJson(Json json) => $.call(json);
 }

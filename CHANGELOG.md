@@ -1,5 +1,99 @@
 # Changelog
 
+## 3.0.0 — `Schema` classes, replacing the Record requirement
+
+`ModelType<M, S>` now takes a **`Schema<M>` instance** instead of a bare
+`List<Field<M, Object?>>`, with `S` constrained to `extends Schema<M>`. A
+`Schema` is a small class you extend, declaring each field once as a
+`late final` member via `field<R>(jsonKey, ...)`, with a required `all`
+getter listing every field **in constructor-parameter order**:
+
+```dart
+final class SensorSchema extends Schema<Sensor> {
+  late final uid = field<String>('sensor_uid');
+  late final value = field<double>('last_value');
+
+  @override
+  late final all = [uid, value];
+}
+
+static final $ = ModelType<Sensor, SensorSchema>(Sensor.new, SensorSchema());
+late final copyWith = $.bind(this);
+```
+
+```dart
+sensor.copyWith(($) => [$.value.set(99.9)]); // $.value — a real member access
+```
+
+### Why
+
+2.0.0's Record schema solved the problem a Record is good at — a
+compiler-checked `$.value` with no string lookup — but left every model
+with **two** declarations to keep in sync: the Record `typedef` (the named
+accessors) and the plain field list passed to `ModelType` (the
+constructor-parameter order `fromJson` actually needs). `Schema<M>` is
+both at once: its members are the named accessors, and its `all` getter
+*is* the ordered field list. One declaration instead of two, with the same
+guarantee a Record gave — a typo in `$.vlaue` is still a compile error,
+not a runtime one.
+
+### Breaking
+
+- `ModelType<M>` is now `ModelType<M, S extends Schema<M>>` — the bare
+  `List<Field<M, Object?>>` constructor argument is replaced by a
+  `Schema<M>` instance.
+- `ModelType.bind(instance, schema)` is now `ModelType.bind(instance)` —
+  the schema is already known from `ModelType<M, S>`'s `S`, so it doesn't
+  need to be passed again at the call site.
+- Models that previously declared only a field list (no Record, no
+  `copyWith`) now declare a minimal `Schema<M>` subclass overriding just
+  `all` — see the README's "Minimal — no copyWith" section. One small
+  wrapper class instead of a bare list literal; the `'jsonKey'.field(...)`
+  calls inside it are unchanged.
+- **`FieldStringX.field`'s `parser` is now a named, optional parameter**
+  (`{R Function(Object?)? parser, ...}`), matching `Schema.field` and
+  `buildField`. It used to be a required (if nullably-typed) positional
+  parameter, which made `'name'.field()` — passing no parser at all, for
+  smart-inferred primitives — fail to compile, contradicting the
+  "smart inference, no parser needed" behavior this same file's own doc
+  comments described.
+
+### Fixed
+
+- **An unsound `null as R` cast had crept back into the field-parsing
+  path.** `Field.parser` had regressed to `R Function(Object?)` — the
+  exact shape the 1.0.0 entry above describes replacing — so a
+  missing/`null` value for a non-nullable `R` triggered a raw, unsound
+  cast inside the parser closure instead of cleanly falling through to
+  `fromJson`'s `RequiredFieldError` check. `Field.parser` is
+  `Object? Function(Object?)` again; the parser closure returns `null`
+  directly, with no cast.
+- **`nullable` wasn't actually defaulting to `null is R`.** Despite the
+  README and the 1.0.0 entry above both documenting that default,
+  `buildField` (and `.field()`, and `Schema.field`) all hard-coded
+  `nullable: false` unless the caller passed `nullable: true` explicitly —
+  so a field typed `String?` was, in practice, still treated as required.
+  The default is now actually computed: `nullable ?? (null is R)`.
+- **`httpUriOrNull` accepted any absolute URI with a host**, including
+  non-HTTP schemes (`ftp://`, `ws://`, ...), contradicting its name and
+  documentation. It now also checks `scheme == 'http' || scheme == 'https'`.
+- **`bigIntOrNull` didn't accept `double`**, only `int` — a JSON number
+  like `42.0` (which decodes to `double`) fell through to `null` instead
+  of becoming `BigInt.from(42)`, unlike every sibling parser in the file
+  (`intOrNull`, `doubleOrNull`, `numOrNull`), which all match on `num`.
+- `SerializableHelpers._writeDeep` could throw a raw, uninformative
+  `TypeError` if a non-`Map` value already occupied an intermediate path
+  segment (e.g. from a malformed patch). It now skips the write instead.
+- Library directive renamed from `library serializable;` to
+  `library json_forge;` to match the actual package name.
+- Removed stale documentation (this file's own usage examples, and the
+  README) describing a `getter` and `name:` parameter on `.field(...)`.
+  Neither has been part of `Field`/`buildField`'s real signature for a
+  while — a field's value is recovered via a parse-time cache
+  (`Field.attach`), not a getter closure. See that doc comment for what
+  this implies about constructing models directly vs. via
+  `fromJson`/`copyWith`.
+
 ## 2.0.0 — Record-based schemas, replacing `FieldSet`
 
 `FieldSet` (the abstract class, `operator []`, `byJsonKey`, and the
