@@ -27,9 +27,13 @@
 //      for any instance built via its own constructor instead of
 //      `fromJson`/`copyWith` (and threw a raw cast TypeError on a custom
 //      `serializer` instead, since `null as R` is unsound for non-nullable
-//      `R`). `toJson()` is now built from `props` + `fields` (see
+//      `R`). `toJson()` is now built from `fields` + `props` (see
 //      [Serializable] below) — real values, regardless of how the instance
-//      was constructed, with no per-field getter required.
+//      was constructed, with no per-field getter required. A length
+//      mismatch between `fields` and `props` is now a clear `StateError`
+//      (not a debug-only assert), and a per-slot `is R` check (debug-only;
+//      see `Field.acceptsValue`) catches many — not all — cases of the two
+//      lists being out of order.
 // =============================================================================
 
 import 'package:equatable/equatable.dart';
@@ -81,7 +85,11 @@ final class _Undefined {
 /// the constructor's parameter order.** This is critical for two reasons:
 /// [SerializableHelpers.fromJson] passes parsed values to the constructor
 /// positionally via [Function.apply], and [Serializable.toJson] zips
-/// [fields] with [props] index-for-index to build the JSON.
+/// [fields] with [props] index-for-index to build the JSON. A length
+/// mismatch between the two throws a clear [StateError] immediately; an
+/// `is`-compatible-but-wrong-order mix-up (two fields of the same type
+/// swapped) is checked best-effort in debug mode — see
+/// [Field.acceptsValue].
 abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
   /// All field descriptors, in constructor-parameter order.
   ///
@@ -100,8 +108,10 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
   ///
   /// This is the plain `Equatable` `props` list — write it the same way
   /// you would for any `Equatable` class, referencing the model's own
-  /// properties directly (e.g. `[id, name, address]`). [Serializable]
-  /// builds both `toJson()` and `Equatable`'s `==`/`hashCode` from it.
+  /// properties directly (e.g. `[id, name, address]`) — no JSON keys or
+  /// strings of any kind belong here, only the values themselves.
+  /// [Serializable] builds both `toJson()` and `Equatable`'s
+  /// `==`/`hashCode` from it.
   Props get props;
 }
 
@@ -120,7 +130,10 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
 /// closure on [Field] could do it, but would need to be both declared by
 /// the user *and* threaded through `Field<M, R>`'s type erasure — `props`
 /// gets the same result (real values, for any instance, however it was
-/// built) from a single, ordinary `Equatable` list instead.
+/// built) from a single, ordinary `Equatable` list instead, with no
+/// strings anywhere in it (a JSON-keyed `Map` was considered and rejected
+/// for exactly this reason — it would reintroduce the same stringly-typed
+/// duplication `Schema`/`Field` exist to get rid of in the first place).
 ///
 /// ### Full Model Example
 ///
@@ -224,7 +237,7 @@ final class SerializableHelpers {
           SerializationError(
             modelType: R,
             jsonKey: f.jsonKey,
-            path: [...f.nesting, f.jsonKey].join('.'),
+            path: f.path,
             rawValue: raw,
             cause: e,
           ),
@@ -241,7 +254,7 @@ final class SerializableHelpers {
         throw RequiredFieldError(
           modelType: R,
           jsonKey: f.jsonKey,
-          path: [...f.nesting, f.jsonKey].join('.'),
+          path: f.path,
           rawValue: raw,
         );
       }
@@ -326,8 +339,8 @@ final class SerializableHelpers {
   // toJson (internal)
   // ===========================================================================
 
-  /// Builds a JSON-Map from [fields] and the model's [props] — index `i` of
-  /// `props` is the current value of `fields[i]`. Both must be the same
+  /// Builds a JSON-Map from [fields] and the model's [props] — index `i`
+  /// of `props` is the current value of `fields[i]`. Both must be the same
   /// length and in the same (constructor-parameter) order; see
   /// [SerializableModelI] for why.
   ///
@@ -336,19 +349,34 @@ final class SerializableHelpers {
   ///   - Otherwise → [_serialize] with default smart logic.
   ///
   /// Fields with nesting are written via [_writeDeep] — creates nested Maps on the fly.
+  ///
+  /// Throws [StateError] (in every build mode, not just debug) if `fields`
+  /// and `props` differ in length — the single most common way the two get
+  /// out of sync (a field added to one but not the other). A same-length
+  /// but wrong-*order* mistake is checked best-effort in debug mode only,
+  /// via [Field.acceptsValue] — see the `assert` below.
   static Json _buildJson<M>(ListFieldOf<M> fields, Props props) {
-    assert(
-      fields.length == props.length,
-      '_buildJson: fields (${fields.length}) and props (${props.length}) '
-      'must be the same length and in the same order — both must list every '
-      "field in the model's constructor-parameter order.",
-    );
+    if (fields.length != props.length) {
+      throw StateError(
+        'Serializable.toJson(): fields has ${fields.length} entries but '
+        'props has ${props.length}. Both must list every field, in the '
+        "same order as the model's constructor parameters.",
+      );
+    }
 
     final result = <String, Object?>{};
 
     for (var i = 0; i < fields.length; i++) {
       final f = fields[i];
       final val = props[i];
+
+      assert(
+        f.acceptsValue(val),
+        'Serializable.toJson(): props[$i] ($val: ${val.runtimeType}) does '
+        'not look like it belongs to fields[$i] (jsonKey "${f.jsonKey}"). '
+        'fields and props are probably out of order — both must list every '
+        "field in the same order as the model's constructor parameters.",
+      );
 
       final serialized = f.hasSerializer
           // Use the type-erased wrapper — safe with an erased type.

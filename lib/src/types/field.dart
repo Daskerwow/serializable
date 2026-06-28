@@ -5,8 +5,8 @@
 // the key, how to parse it, and how to serialize it back. It holds no
 // per-instance state and no getter — a model's *current* values come from
 // its own `props` (the standard Equatable list), not from this class. See
-// `Serializable.toJson()` in serializable_model.dart for how the two are
-// zipped together.
+// `Serializable` in serializable_model.dart for how `fields` and `props`
+// are zipped together to build `toJson()`.
 //
 // Do not create [Field] directly — use the [FieldStringX] extension:
 //   'json_key'.field<M, int>(parser: intOrZero)
@@ -101,6 +101,23 @@ final class Field<M, R> {
   /// Safe at any level of type erasure.
   /// Call only after checking [hasSerializer].
   Object? serializeErased(Object? value) => _erased!(value);
+
+  /// The full dot-separated path for this field: [nesting] followed by
+  /// [jsonKey] (e.g. `'meta.count'` for `at('meta', ...)` + jsonKey
+  /// `'count'`; just `jsonKey` itself when there's no nesting). Used in
+  /// error messages — see [SerializableHelpers.fromJson].
+  String get path => nesting.isEmpty ? jsonKey : [...nesting, jsonKey].join('.');
+
+  /// Best-effort check that [value] could plausibly be this field's
+  /// current value — `value is R`.
+  ///
+  /// Used by `Serializable.toJson()` as a debug-mode sanity check that
+  /// `props` lines up with `fields` in the same order: it catches many
+  /// transposition mistakes (e.g. a `List` field swapped with a `String`
+  /// one), but not all (two fields of the identical type, swapped, still
+  /// passes — only an actual getter, or the model's own correctness, can
+  /// catch that).
+  bool acceptsValue(Object? value) => value is R;
 }
 
 // =============================================================================

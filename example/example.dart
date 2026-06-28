@@ -35,7 +35,7 @@ final class SensorSchema extends Schema<Sensor> {
   late final history = field('history_logs', parser: listOf(dateTimeOrEpoch));
 
   @override
-  ListFieldOf<Sensor> get all => [uid, value, history];
+  late final all = [uid, value, history];
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -91,7 +91,7 @@ final class TerminalSchema extends Schema<Terminal> {
   );
 
   @override
-  ListFieldOf<Terminal> get all => [id, title, status, sensors, tokens];
+  late final all = [id, title, status, sensors, tokens];
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -139,9 +139,15 @@ void main() {
 
   // toJson()/== are built from `props`, so they work just as correctly on
   // a Terminal built by calling its constructor directly — no fromJson
-  // involved at all — as long as `props` (and `fields`) list every
-  // argument in the same order as the constructor.
-  final direct = Terminal(1, 'Direct', DeviceStatus.active, const [], const {});
+  // involved at all — as long as `props` lists the same fields, in the
+  // same order, as `fields` (and the constructor).
+  final direct = Terminal(
+    1,
+    'Direct',
+    DeviceStatus.active,
+    const [],
+    const {},
+  );
   final directUpdated = direct.copyWith(($) => [$.title.set('Direct Updated')]);
   print('direct-construction toJson: ${direct.toJson()}');
   print('direct-construction copyWith: ${directUpdated.toJson()}');

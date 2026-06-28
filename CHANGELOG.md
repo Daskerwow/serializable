@@ -21,7 +21,7 @@ class Terminal extends Equatable with Serializable<Terminal> {
 ### Why
 
 `Field` previously cached each parsed value against the instance it was
-parsed _for_, via an `Expando` (`Field.attach`, populated only by
+parsed *for*, via an `Expando` (`Field.attach`, populated only by
 `fromJson`), and `toJson()`/`props` read that cache back instead of
 calling a getter. That cache was only ever populated by `fromJson` — so
 for any model built by calling its own constructor directly (a perfectly
@@ -40,14 +40,29 @@ came back `null`:
   since `copyWith` starts by calling `toJson()` on the current instance.
 
 Fixing this without a per-field getter on `Field` (which would need both a
-user-supplied closure _and_ a contravariant type-erasure wrapper, the same
+user-supplied closure *and* a contravariant type-erasure wrapper, the same
 problem `serializer` already has) means the model has to supply its
 current values some other way. `props` already exists for exactly this —
 `Equatable` requires it from every subclass — so `toJson()` now reads from
 it instead of from a cache. The result is simpler (the `Expando`, `attach`,
 and `readErased` machinery is gone from `Field` entirely) and correct
-unconditionally: `toJson()`/`==` now reflect real values for _any_
+unconditionally: `toJson()`/`==` now reflect real values for *any*
 instance, not only ones built via `fromJson`/`copyWith`.
+
+A `Map<String, Object?>` keyed by JSON key — looked up by key instead of
+matched by position — was also tried, specifically to remove the
+requirement that `props` and `fields` stay in the same *order*. It was
+reverted: every entry would have needed its JSON key spelled out as a
+string literal a second time (it's already on the matching `Field` in
+`fields`), which is exactly the stringly-typed duplication `Schema`/`Field`
+exist to eliminate in the first place — trading one footgun for a worse
+one. `props` stays a plain, string-free list. What *did* survive from that
+detour: `fields` and `props` differing in length is now a `StateError` in
+every build mode (previously nothing checked this at all), and in debug
+builds, each slot's value is checked against its field's type
+(`Field.acceptsValue`) as a best-effort sanity check — it won't catch two
+same-typed fields swapped, but it catches a lot of other mistakes, for
+free, immediately, rather than producing silently-wrong JSON.
 
 ### Breaking
 
@@ -58,6 +73,11 @@ instance, not only ones built via `fromJson`/`copyWith`.
 - `Field.attach` and `Field.readErased` are removed. Nothing in this
   package called them except the now-deleted cache-population loop in
   `fromJson` and the now-deleted default `props` getter.
+- Added `Field.path` (`nesting` joined with `jsonKey`, e.g. `'meta.count'`
+  for a field declared via `at('meta', ...)` with jsonKey `'count'`) and
+  `Field.acceptsValue` (`value is R`, used by the debug-mode check above).
+  `fromJson`'s error-path construction now uses `Field.path` instead of
+  computing the same join inline in two places.
 
 ## 3.0.0 — `Schema` classes, replacing the Record requirement
 
@@ -92,7 +112,7 @@ with **two** declarations to keep in sync: the Record `typedef` (the named
 accessors) and the plain field list passed to `ModelType` (the
 constructor-parameter order `fromJson` actually needs). `Schema<M>` is
 both at once: its members are the named accessors, and its `all` getter
-_is_ the ordered field list. One declaration instead of two, with the same
+*is* the ordered field list. One declaration instead of two, with the same
 guarantee a Record gave — a typo in `$.vlaue` is still a compile error,
 not a runtime one.
 
