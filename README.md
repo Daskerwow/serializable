@@ -145,7 +145,7 @@ class Gadget extends Equatable with Serializable<Gadget> {
 
 final class GadgetSchema extends Schema<Gadget> {
   @override
-  late final all = [
+  ListFieldOf<Gadget> get all => [
     'gadget_uid'.field<Gadget, String>(),
     'reading'.field<Gadget, double>(parser: doubleOrZero),
   ];
@@ -174,7 +174,7 @@ final class TerminalSchema extends Schema<Terminal> {
   // ...
 
   @override
-  late final all = [title, status /* , ... */];
+  ListFieldOf<Terminal> get all => [title, status /* , ... */];
 }
 
 terminal.copyWith(($) => [
