@@ -46,7 +46,7 @@ final class SensorSchema extends Schema<Sensor> {
   late final value = field<double>('last_value');
 
   @override
-  late final all = [uid, value];
+  ListFieldOf<Sensor> get all => [uid, value];
 }
 
 void main() {
@@ -65,20 +65,20 @@ come from `Equatable`, driven by that same `props`).
 > current field values generically — something has to supply them. A
 > per-field getter closure on `Field` could do it, but `props` gets the
 > same result with one ordinary `Equatable` list instead — and as a bonus,
-> it means `toJson()`/`==` are correct for *any* `Sensor`, including one
+> it means `toJson()`/`==` are correct for _any_ `Sensor`, including one
 > built by calling its constructor directly, not just ones built via
 > `fromJson`/`copyWith`. (A JSON-keyed `Map` instead of an ordered list was
 > considered, to avoid needing `props` and `fields` in the same order —
 > and rejected, because it would mean writing every JSON key out as a
 > string a second time, which is exactly the kind of stringly-typed
 > duplication `Schema`/`Field` exist to eliminate. `toJson()` does check
-> that `props` and `fields` are at least the same *length*, always, and
+> that `props` and `fields` are at least the same _length_, always, and
 > — in debug builds — that each slot's value looks like it belongs to
 > that slot's field.)
 
 ## Why a `Schema` class, and not a string key, `Symbol`, or Record?
 
-`copyWith`'s builder needs *some* way to give you back the right `Field`
+`copyWith`'s builder needs _some_ way to give you back the right `Field`
 object for a given model property — `$.title`, ideally, not `$['title']`.
 There's no codegen-free way to ask Dart "what property does this model
 expose under this name?": Dart has no runtime reflection on Flutter/AOT
@@ -92,7 +92,7 @@ against any real declaration (`#tiel` "compiles" exactly as readily as
 `'tiel'` would), and `Symbol`/reflection-based dispatch generally isn't
 safe under `dart compile exe --obfuscate`, which is also why this package
 never uses named-argument `Function.apply` dispatch internally. A Dart
-*Record* is another option (and is what earlier versions of this package
+_Record_ is another option (and is what earlier versions of this package
 used — see the CHANGELOG) — but it's a second declaration to keep in sync
 with the field list `ModelType` actually needs.
 
@@ -101,7 +101,7 @@ field<String>('display_name');` on a class extending `Schema<M>` — gets
 the same compiler guarantees a Record does (`$.title` is resolved by the
 analyzer like any other member access; a typo is a compile error, not a
 runtime one), while also being the field list itself: the schema's
-required `all` getter *is* the ordered list `ModelType` feeds into
+required `all` getter _is_ the ordered list `ModelType` feeds into
 `fromJson`. One declaration covers both `fromJson`/`toJson` and type-safe
 `copyWith` — there's no separate Record `typedef` to keep matching it.
 
