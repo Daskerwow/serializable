@@ -38,7 +38,6 @@ class Sensor extends Equatable with Serializable<Sensor> {
   Props get props => [uid, value, history];
 
   factory Sensor.fromJson(Json json) => $.call(json);
-
   Sensor copyWith(FieldsBuilder<SensorSchema> builder) => $.bind(this)(builder);
 }
 

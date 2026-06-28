@@ -36,7 +36,6 @@
 //      lists being out of order.
 // =============================================================================
 
-import 'package:collection/collection.dart';
 import 'package:equatable/equatable.dart';
 
 import 'errors.dart';
@@ -357,13 +356,11 @@ final class SerializableHelpers {
   /// but wrong-*order* mistake is checked best-effort in debug mode only,
   /// via [Field.acceptsValue] — see the `assert` below.
   static Json _buildJson<M>(ListFieldOf<M> fields, Props props) {
-    final equality = ListEquality();
-
-    if (!equality.equals(fields, props)) {
+    if (fields.length != props.length) {
       throw StateError(
-        'Serializable.toJson() mismatch: "fields" and "props" do not match. '
-        'Both must have the same length, types, and values in the exact same order '
-        'as the constructor parameters. \nFields: $fields \nProps: $props',
+        'Serializable.toJson(): fields has ${fields.length} entries but '
+        'props has ${props.length}. Both must list every field, in the '
+        "same order as the model's constructor parameters.",
       );
     }
 
