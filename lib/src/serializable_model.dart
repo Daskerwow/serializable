@@ -427,7 +427,8 @@ final class SerializableHelpers {
     final List l => l.map(_serialize).toList(growable: false),
     final Set s => s.map(_serialize).toList(growable: false),
     final Map m => {
-      for (final e in m.entries) e.key.toString(): _serialize(e.value),
+      for (final MapEntry(:key, :value) in m.entries)
+        key.toString(): _serialize(value),
     },
     // Special types — into strings/numbers.
     final DateTime dt => dt.toIso8601String(),
