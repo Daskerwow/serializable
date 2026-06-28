@@ -33,7 +33,7 @@ class Sensor extends Equatable with Serializable<Sensor> {
 
   factory Sensor.fromJson(Json json) => $.call(json);
 
-  late final copyWith = $.bind(this);
+  Sensor copyWith(FieldsBuilder<SensorSchema> updates) => $.bind(this)(updates);
 }
 
 // A class you extend, declaring each field once as a member. This is what
