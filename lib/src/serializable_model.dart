@@ -36,6 +36,7 @@
 //      lists being out of order.
 // =============================================================================
 
+import 'package:collection/collection.dart';
 import 'package:equatable/equatable.dart';
 
 import 'errors.dart';
@@ -356,11 +357,13 @@ final class SerializableHelpers {
   /// but wrong-*order* mistake is checked best-effort in debug mode only,
   /// via [Field.acceptsValue] — see the `assert` below.
   static Json _buildJson<M>(ListFieldOf<M> fields, Props props) {
-    if (fields.length != props.length) {
+    final equality = ListEquality();
+
+    if (!equality.equals(fields, props)) {
       throw StateError(
-        'Serializable.toJson(): fields has ${fields.length} entries but '
-        'props has ${props.length}. Both must list every field, in the '
-        "same order as the model's constructor parameters.",
+        'Serializable.toJson() mismatch: "fields" and "props" do not match. '
+        'Both must have the same length, types, and values in the exact same order '
+        'as the constructor parameters. \nFields: $fields \nProps: $props',
       );
     }
 
@@ -370,13 +373,15 @@ final class SerializableHelpers {
       final f = fields[i];
       final val = props[i];
 
-      assert(
-        f.acceptsValue(val),
-        'Serializable.toJson(): props[$i] ($val: ${val.runtimeType}) does '
-        'not look like it belongs to fields[$i] (jsonKey "${f.jsonKey}"). '
-        'fields and props are probably out of order — both must list every '
-        "field in the same order as the model's constructor parameters.",
-      );
+      if (!f.acceptsValue(val)) {
+        throw StateError(
+          'Serializable.toJson(): props[$i] ($val: ${val.runtimeType}) '
+          'does not look like it belongs to fields[$i] (jsonKey '
+          '"${f.jsonKey}"). fields and props are probably out of order — '
+          'both must list every field in the same order as the model\'s '
+          'constructor parameters.',
+        );
+      }
 
       final serialized = f.hasSerializer
           // Use the type-erased wrapper — safe with an erased type.
@@ -466,7 +471,7 @@ final class SerializableHelpers {
   ///
   /// Public method — used in [ModelBinder] to write patches
   /// of nested fields (declared via `at(...)`).
-  // ignore: library_private_types_in_public_api
+  /// ignore: library_private_types_in_public_api
   static void writeDeep(Json map, List<String> keys, Object? value) =>
       _writeDeep(map, keys, value);
 
@@ -481,7 +486,7 @@ final class SerializableHelpers {
       // nothing sensible to descend into. Skip rather than letting an
       // unrelated `as Json` cast fail with a raw, uninformative TypeError.
       if (next is! Map) return;
-      current = next as Json;
+      current = Json.from(next);
     }
     current[keys.last] = value;
   }
