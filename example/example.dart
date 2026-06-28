@@ -35,7 +35,7 @@ final class SensorSchema extends Schema<Sensor> {
   late final history = field('history_logs', parser: listOf(dateTimeOrEpoch));
 
   @override
-  late final all = [uid, value, history];
+  ListFieldOf<Sensor> get all => [uid, value, history];
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -91,7 +91,7 @@ final class TerminalSchema extends Schema<Terminal> {
   );
 
   @override
-  late final all = [id, title, status, sensors, tokens];
+  ListFieldOf<Terminal> get all => [id, title, status, sensors, tokens];
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
