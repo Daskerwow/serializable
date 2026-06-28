@@ -71,10 +71,12 @@ come from `Equatable`, driven by that same `props`).
 > considered, to avoid needing `props` and `fields` in the same order —
 > and rejected, because it would mean writing every JSON key out as a
 > string a second time, which is exactly the kind of stringly-typed
-> duplication `Schema`/`Field` exist to eliminate. `toJson()` does check
-> that `props` and `fields` are at least the same _length_, always, and
-> — in debug builds — that each slot's value looks like it belongs to
-> that slot's field.)
+> duplication `Schema`/`Field` exist to eliminate. `toJson()` checks, in
+> every build mode (not just debug), that `props` and `fields` are the
+> same _length_, and that each slot's value is even the right _type_ for
+> that slot's field — it won't catch two same-typed fields swapped, but it
+> catches everything else, immediately, instead of silently writing wrong
+> JSON.)
 
 ## Why a `Schema` class, and not a string key, `Symbol`, or Record?
 

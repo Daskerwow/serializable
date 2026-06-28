@@ -129,7 +129,6 @@ final class UserSchema extends Schema<User> {
   late final email = field<String>('email_address');
   late final isActive = field<bool>('is_active');
   late final role = field('user_role', parser: enumOrFirst(UserRole.values));
-
   late final createdAt = field<DateTime>('created_at');
 
   // `nullable: true` is spelled out here even though it'd default to

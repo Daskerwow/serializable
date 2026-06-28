@@ -111,12 +111,12 @@ final class Field<M, R> {
   /// Best-effort check that [value] could plausibly be this field's
   /// current value — `value is R`.
   ///
-  /// Used by `Serializable.toJson()` as a debug-mode sanity check that
-  /// `props` lines up with `fields` in the same order: it catches many
-  /// transposition mistakes (e.g. a `List` field swapped with a `String`
-  /// one), but not all (two fields of the identical type, swapped, still
-  /// passes — only an actual getter, or the model's own correctness, can
-  /// catch that).
+  /// Used by `Serializable.toJson()` — in every build mode, not just
+  /// debug — as a sanity check that `props` lines up with `fields` in the
+  /// same order: it catches many transposition mistakes (e.g. a `List`
+  /// field swapped with a `String` one), but not all (two fields of the
+  /// identical type, swapped, still passes — only an actual getter, or
+  /// the model's own correctness, can catch that).
   bool acceptsValue(Object? value) => value is R;
 }
 

@@ -30,10 +30,10 @@
 //      `R`). `toJson()` is now built from `fields` + `props` (see
 //      [Serializable] below) — real values, regardless of how the instance
 //      was constructed, with no per-field getter required. A length
-//      mismatch between `fields` and `props` is now a clear `StateError`
-//      (not a debug-only assert), and a per-slot `is R` check (debug-only;
-//      see `Field.acceptsValue`) catches many — not all — cases of the two
-//      lists being out of order.
+//      mismatch between `fields` and `props`, or a per-slot type mismatch
+//      (see `Field.acceptsValue`), is now a clear `StateError` — in every
+//      build mode, including release, not just a debug-only `assert` —
+//      catching many (not all) cases of the two lists being out of order.
 // =============================================================================
 
 import 'package:equatable/equatable.dart';
@@ -86,10 +86,13 @@ final class _Undefined {
 /// [SerializableHelpers.fromJson] passes parsed values to the constructor
 /// positionally via [Function.apply], and [Serializable.toJson] zips
 /// [fields] with [props] index-for-index to build the JSON. A length
-/// mismatch between the two throws a clear [StateError] immediately; an
-/// `is`-compatible-but-wrong-order mix-up (two fields of the same type
-/// swapped) is checked best-effort in debug mode — see
-/// [Field.acceptsValue].
+/// mismatch between the two throws a clear [StateError] immediately, in
+/// every build mode; so does a same-length but wrong-*order* mix-up,
+/// **if** it produces a value of the wrong type for some slot (e.g. two
+/// differently-typed fields swapped) — see [Field.acceptsValue]. Two
+/// fields of the *identical* type swapped still isn't caught: nothing
+/// short of an actual getter (or the model author getting `props` right)
+/// can tell two same-typed values apart.
 abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
   /// All field descriptors, in constructor-parameter order.
   ///
@@ -350,11 +353,17 @@ final class SerializableHelpers {
   ///
   /// Fields with nesting are written via [_writeDeep] — creates nested Maps on the fly.
   ///
-  /// Throws [StateError] (in every build mode, not just debug) if `fields`
-  /// and `props` differ in length — the single most common way the two get
-  /// out of sync (a field added to one but not the other). A same-length
-  /// but wrong-*order* mistake is checked best-effort in debug mode only,
-  /// via [Field.acceptsValue] — see the `assert` below.
+  /// Throws [StateError] — in every build mode, including release — if
+  /// `fields` and `props` differ in length, or if some `props[i]` doesn't
+  /// look like it belongs to `fields[i]` (see [Field.acceptsValue]). This
+  /// used to be a debug-only `assert`; it isn't anymore, because a field
+  /// *with* a custom `serializer` already throws on a type mismatch in
+  /// release builds too (the unsound `as R` inside `serializeErased`), but
+  /// a field *without* one doesn't — [_serialize]'s fallback case passes
+  /// any unrecognized value straight through — so release builds were
+  /// silently writing wrong data for exactly the fields that don't crash.
+  /// Checking unconditionally costs one cheap `is` check per field and
+  /// closes that gap.
   static Json _buildJson<M>(ListFieldOf<M> fields, Props props) {
     if (fields.length != props.length) {
       throw StateError(
@@ -469,7 +478,7 @@ final class SerializableHelpers {
   ///
   /// Public method — used in [ModelBinder] to write patches
   /// of nested fields (declared via `at(...)`).
-  /// ignore: library_private_types_in_public_api
+  // ignore: library_private_types_in_public_api
   static void writeDeep(Json map, List<String> keys, Object? value) =>
       _writeDeep(map, keys, value);
 
@@ -484,7 +493,7 @@ final class SerializableHelpers {
       // nothing sensible to descend into. Skip rather than letting an
       // unrelated `as Json` cast fail with a raw, uninformative TypeError.
       if (next is! Map) return;
-      current = Json.from(next);
+      current = next as Json;
     }
     current[keys.last] = value;
   }

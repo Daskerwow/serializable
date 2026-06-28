@@ -57,12 +57,20 @@ string literal a second time (it's already on the matching `Field` in
 `fields`), which is exactly the stringly-typed duplication `Schema`/`Field`
 exist to eliminate in the first place — trading one footgun for a worse
 one. `props` stays a plain, string-free list. What *did* survive from that
-detour: `fields` and `props` differing in length is now a `StateError` in
-every build mode (previously nothing checked this at all), and in debug
-builds, each slot's value is checked against its field's type
-(`Field.acceptsValue`) as a best-effort sanity check — it won't catch two
-same-typed fields swapped, but it catches a lot of other mistakes, for
-free, immediately, rather than producing silently-wrong JSON.
+detour, and is checked in **every** build mode, including release, not
+just debug: `fields` and `props` differing in length throws a
+`StateError` immediately (previously nothing checked this at all), and so
+does any single slot whose value is the wrong *type* for that slot's field
+(`Field.acceptsValue`, `value is R`). The per-slot check was originally a
+debug-only `assert`, then made unconditional too: a field *with* a custom
+`serializer` already throws on a type mismatch in release builds (the
+unsound `as R` inside `serializeErased`), but a field *without* one
+doesn't — `_serialize`'s fallback case passes any unrecognized value
+straight through — so release builds were silently writing wrong data for
+exactly the fields that don't crash. Neither check catches two same-typed
+fields swapped (nothing short of an actual getter can), but together they
+catch everything else, immediately, instead of producing silently-wrong
+JSON.
 
 ### Breaking
 
@@ -75,9 +83,9 @@ free, immediately, rather than producing silently-wrong JSON.
   `fromJson` and the now-deleted default `props` getter.
 - Added `Field.path` (`nesting` joined with `jsonKey`, e.g. `'meta.count'`
   for a field declared via `at('meta', ...)` with jsonKey `'count'`) and
-  `Field.acceptsValue` (`value is R`, used by the debug-mode check above).
-  `fromJson`'s error-path construction now uses `Field.path` instead of
-  computing the same join inline in two places.
+  `Field.acceptsValue` (`value is R`, used by the unconditional check
+  above). `fromJson`'s error-path construction now uses `Field.path`
+  instead of computing the same join inline in two places.
 
 ## 3.0.0 — `Schema` classes, replacing the Record requirement
 
