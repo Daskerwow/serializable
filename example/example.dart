@@ -25,7 +25,7 @@ class Sensor extends Equatable with Serializable<Sensor> {
   @override
   Props get props => [uid, value, history];
 
-  static Sensor fromJson(Json json) => $.call(json);
+  factory Sensor.fromJson(Json json) => $.call(json);
   Sensor copyWith(FieldsBuilder<SensorSchema> updates) => $.bind(this)(updates);
 }
 
@@ -62,7 +62,7 @@ class Terminal extends Equatable with Serializable<Terminal> {
   @override
   Props get props => [id, title, status, sensors, tokens];
 
-  static Terminal fromJson(Json json) => $.call(json);
+  factory Terminal.fromJson(Json json) => $.call(json);
 
   Terminal copyWith(FieldsBuilder<TerminalSchema> updates) =>
       $.bind(this)(updates);

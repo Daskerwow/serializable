@@ -34,7 +34,7 @@ class Sensor extends Equatable with Serializable<Sensor> {
 
   factory Sensor.fromJson(Json json) => $.call(json);
 
-  late final copyWith = $.bind(this);
+  Sensor copyWith(FieldsBuilder<SensorSchema> builder) => $.bind(this)(builder);
 }
 
 // A class you extend, declaring each field once as a member. This is what
@@ -140,7 +140,7 @@ class Gadget extends Equatable with Serializable<Gadget> {
   @override
   Props get props => [uid, reading];
 
-  static Gadget fromJson(Json json) => $.call(json);
+  factory Gadget.fromJson(Json json) => $.call(json);
 }
 
 final class GadgetSchema extends Schema<Gadget> {

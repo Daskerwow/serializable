@@ -46,7 +46,10 @@ class Sensor extends Equatable with Serializable<Sensor> {
 final class SensorSchema extends Schema<Sensor> {
   late final uid = field<String>('sensor_uid');
   late final value = field<double>('last_value');
-  late final history = field('history_logs', parser: listOf<DateTime>(dateTimeOrEpoch));
+  late final history = field(
+    'history_logs',
+    parser: listOf<DateTime>(dateTimeOrEpoch),
+  );
 
   @override
   ListFieldOf<Sensor> get all => [uid, value, history];
