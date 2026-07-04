@@ -1,0 +1,56 @@
+// =============================================================================
+// model_parser.dart
+//
+// Parsers for nested models (`T Function(Json)` factories) and for "raw"
+// JSON objects.
+// =============================================================================
+
+import '../types.dart';
+
+/// Parses a nested model from a JSON object. Throws [FormatException] if the
+/// value isn't a `Map`.
+@pragma('vm:prefer-inline')
+Parser<T> modelOf<T>(T Function(Json) fromJson) =>
+    (Object? v) => switch (v) {
+      final Map m => fromJson(Json.from(m)),
+      _ => throw FormatException(
+        'modelOf<$T>: expected a Map, got ${v?.runtimeType}',
+      ),
+    };
+
+/// Parses a nested model from a JSON object. Returns `null` if the value
+/// isn't a `Map`.
+@pragma('vm:prefer-inline')
+Parser<T?> modelOrNull<T>(T Function(Json) fromJson) =>
+    (Object? v) => switch (v) {
+      final Map m => fromJson(Json.from(m)),
+      _ => null,
+    };
+
+/// Alias for [modelOf] — for symmetry with the other `xOrThrow` parsers.
+@pragma('vm:prefer-inline')
+Parser<T> modelOrThrow<T>(T Function(Json) fromJson) => modelOf(fromJson);
+
+// =============================================================================
+// Raw JSON object
+// =============================================================================
+
+/// Parses an arbitrary JSON object as `Map<String, Object?>`.
+@pragma('vm:prefer-inline')
+Json? jsonObjectOrNull(Object? v) => switch (v) {
+  final Map m => Json.from(m),
+  _ => null,
+};
+
+@pragma('vm:prefer-inline')
+Json jsonObjectOrEmpty(Object? v) => jsonObjectOrNull(v) ?? const {};
+
+Parser<Json> jsonObjectOrDefault(Map<String, Object?> fallback) =>
+    (Object? v) => jsonObjectOrNull(v) ?? fallback;
+
+@pragma('vm:prefer-inline')
+Json jsonObjectOrThrow(Object? v) =>
+    jsonObjectOrNull(v) ??
+    (throw FormatException(
+      'jsonObjectOrThrow: expected a Map, got ${v?.runtimeType}',
+    ));
