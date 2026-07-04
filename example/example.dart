@@ -6,41 +6,61 @@ enum DeviceStatus { active, maintenance, offline, unknown }
 
 enum AccessLevel { read, write, execute }
 
-enum Greed { boss, user }
+enum Grade { a, b, c }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Sensor
 // ══════════════════════════════════════════════════════════════════════════════
 
+/// A single environmental sensor reading.
+///
+/// This model deliberately has *four* `bool` fields and *two* fields of the
+/// same `Grade` enum — and the sample JSON in `main()` deliberately gives
+/// every one of those `bool`s the same value, and both `Grade` fields the
+/// same member. That's not sloppy modeling; it's here on purpose, to prove
+/// something real: `Schema.set((m) => m.field, value)` still has to resolve
+/// to the *exact* field the selector reads, even when several same-typed
+/// fields currently hold the exact same value. See the `$.set(...)` calls
+/// in `main()` for the actual proof — and `ModelBinder`'s doc comments in
+/// the package itself for how the disambiguation is done (a synthetic probe
+/// instance, seeded so same-typed fields provably differ, plus an
+/// exhaustive isolating-probe fallback for finite-domain types like `bool`
+/// and `Enum`, where a single seed can't always tell them apart).
 class Sensor extends Equatable with Serializable<Sensor> {
   const Sensor(
     this.uid,
-    this.value,
-    this.line,
-    this.sore,
-    this.space,
-    this.krope,
-    this.fillipe,
-    this.boss1,
-    this.boss2,
+    this.temperature,
+    this.humidity,
+    this.isActive,
+    this.isCalibrated,
+    this.isFaulty,
+    this.isOffline,
+    this.primaryGrade,
+    this.secondaryGrade,
     this.history,
   );
 
   final String uid;
-  final double value;
-  final double line;
-  final bool sore;
-  final bool space;
-  final bool krope;
-  final bool fillipe;
-  final Greed boss1;
-  final Greed boss2;
+  final double temperature;
+  final double humidity;
+  final bool isActive;
+  final bool isCalibrated;
+  final bool isFaulty;
+  final bool isOffline;
+  final Grade primaryGrade;
+  final Grade secondaryGrade;
   final List<DateTime> history;
 
   static final $ = ModelType<Sensor, SensorSchema>(Sensor.new, SensorSchema());
 
   @override
   ListFieldOf<Sensor> get fields => $.schema.all;
+
+  // No `props` override here: every field below carries a `getter:`, so
+  // `Serializable`'s default implementation derives `props` from them —
+  // and, as a side effect, this is also what makes `copyWith` below take
+  // the allocation-free direct-construction path instead of a JSON
+  // round-trip. See `Terminal` further down for the other style.
 
   factory Sensor.fromJson(Json json) => $.call(json);
   Sensor copyWith(FieldsBuilder<SensorSchema> updates) => $.bind(this)(updates);
@@ -50,14 +70,28 @@ final class SensorSchema extends Schema<Sensor> {
   @override
   ListFieldOf<Sensor> get all => [
     'sensor_uid'.field((m) => m.uid),
-    'last_value'.field((m) => m.value),
-    'line_value'.field((m) => m.line),
-    'sore'.field((m) => m.sore),
-    'space'.field((m) => m.space),
-    'krope'.field((m) => m.krope),
-    'fillipe'.field((m) => m.fillipe),
-    'boos1'.field((m) => m.boss1, parser: enumOrFirst(Greed.values)),
-    'boos2'.field((m) => m.boss2, parser: enumOrFirst(Greed.values)),
+    'temperature'.field((m) => m.temperature),
+    'humidity'.field((m) => m.humidity),
+    'is_active'.field((m) => m.isActive),
+    'is_calibrated'.field((m) => m.isCalibrated),
+    'is_faulty'.field((m) => m.isFaulty),
+    'is_offline'.field((m) => m.isOffline),
+    // Enums always need an explicit parser — and note that it agrees with
+    // the getter's type (`Grade`) exactly. That agreement matters: a
+    // getter/parser mismatch on a field declared inline like this doesn't
+    // fail to compile — Dart's generic inference just joins the two
+    // disagreeing types upward (in the worst case, all the way to
+    // `Object?`, this list's own element type), silently hiding the
+    // mismatch until a `Function.apply` call fails at runtime with an
+    // opaque `TypeError`. See the README's "Gotchas" section.
+    'primary_grade'.field(
+      (m) => m.primaryGrade,
+      parser: enumOrFirst(Grade.values),
+    ),
+    'secondary_grade'.field(
+      (m) => m.secondaryGrade,
+      parser: enumOrFirst(Grade.values),
+    ),
     'history_logs'.field((m) => m.history, parser: listOf(dateTimeOrEpoch)),
   ];
 }
@@ -83,6 +117,14 @@ class Terminal extends Equatable with Serializable<Terminal> {
   @override
   ListFieldOf<Terminal> get fields => $.schema.all;
 
+  // Terminal deliberately keeps the *explicit* `props` style instead of
+  // giving every field a `getter:` — both styles are equally correct;
+  // this one just costs a JSON round-trip on every `copyWith` instead of
+  // a direct constructor call. See `main()` for what that trade-off
+  // actually looks like in practice.
+  @override
+  Props get props => [id, title, status, sensors, tokens];
+
   factory Terminal.fromJson(Json json) => $.call(json);
 
   Terminal copyWith(FieldsBuilder<TerminalSchema> updates) =>
@@ -103,12 +145,18 @@ final class TerminalSchema extends Schema<Terminal> {
       (m) => m.sensors,
       parser: listOf(modelOf(Sensor.fromJson)),
     ),
+    // `access_keys` is an Enum-keyed Map — the one case that genuinely
+    // needs the explicit `<Terminal, Map<AccessLevel, String>>` type
+    // arguments AND a custom serializer. Without the serializer, the
+    // default would key the JSON by `AccessLevel.write.toString()`
+    // ("AccessLevel.write") instead of `.name` ("write"), and
+    // `enumOrFirst` wouldn't recognize that key coming back in on a
+    // later `copyWith` — silently substituting its fallback instead of
+    // raising an error. See the README's "Gotchas" section.
     'access_keys'.field<Terminal, Map<AccessLevel, String>>(
       (m) => m.tokens,
       parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
-      serializer: (map) => {
-        for (final MapEntry(:key, :value) in map.entries) key.name: value,
-      },
+      serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
     ),
   ];
 }
@@ -125,87 +173,106 @@ void main() {
     'attached_sensors': [
       {
         'sensor_uid': 'SN-001',
-        'last_value': 25.0,
-        'line_value': 25.0,
-        'sore': false,
-        'space': false,
-        'krope': false,
-        'fillipe': false,
-        'boos1': 'boss',
-        'boos2': 'boss',
+        'temperature': 22.5,
+        'humidity': 48.0,
+        // All four bools start out `false`, and both grades start out
+        // `'a'` — on purpose. See the `$.set(...)` calls below: this is
+        // the genuine data collision the disambiguation machinery has
+        // to see through.
+        'is_active': false,
+        'is_calibrated': false,
+        'is_faulty': false,
+        'is_offline': false,
+        'primary_grade': 'a',
+        'secondary_grade': 'a',
         'history_logs': ['2026-01-07T10:00:00Z', '2026-01-07T15:30:00Z'],
       },
-
       {
         'sensor_uid': 'SN-002',
-        'last_value': 14.5,
-        'line_value': 189.0,
-        'sore': false,
-        'space': false,
-        'krope': false,
-        'fillipe': false,
-        'boos1': 'boss',
-        'boos2': 'boss',
-        'history_logs': [],
+        'temperature': 19.0,
+        'humidity': 52.5,
+        'is_active': false,
+        'is_calibrated': false,
+        'is_faulty': false,
+        'is_offline': false,
+        'primary_grade': 'a',
+        'secondary_grade': 'a',
+        'history_logs': <String>[],
       },
     ],
     'access_keys': {'read': 'key_r', 'write': 'key_w'},
   };
 
-  final t = Terminal.fromJson(raw);
-  print('id: ${t.id}, title: ${t.title}, status: ${t.status}');
+  final terminal = Terminal.fromJson(Json.of(raw));
+  print(
+    'id: ${terminal.id}, title: ${terminal.title}, status: ${terminal.status}',
+  );
 
-  final u = t.copyWith(
+  // ── copyWith on Terminal: the JSON round-trip path ────────────────────
+  // TerminalSchema's fields don't declare `getter:`, so this copyWith goes
+  // through toJson() -> writeDeep() -> fromJson() — every parser reruns,
+  // even for `sensors` and `tokens`, which weren't touched at all.
+  final renamed = terminal.copyWith(
     ($) => [
       $.set((m) => m.title, 'ZONE_B'),
       $.set((m) => m.status, DeviceStatus.maintenance),
     ],
   );
-  // Terminal's fields don't declare `getter:`, so this copyWith went through
-  // the JSON round-trip path: toJson() -> writeDeep() -> fromJson() ->
-  // every parser (stringOrDefault, enumOrFirst, ...) ran again, even for
-  // `sensors` and `tokens`, which weren't touched.
-  print('updated: ${u.title} / ${u.status}, id same: ${u.id == t.id}');
-
-  final s2 = t.sensors.first.copyWith(($) => [$.set((m) => m.value, 99.9)]);
-  // Every field in SensorSchema has a `getter:`, so this copyWith skipped
-  // JSON entirely: `uid` and `history` were read straight off the current
-  // Sensor via their getters, `value` came from the patch as-is (already a
-  // typed `double`, no re-parsing needed), and Sensor.new was called
-  // directly with the three resulting positional arguments.
-
   print(
-    'sensor value: ${s2.value}, uid same: ${s2.uid == t.sensors.first.uid}',
+    'renamed: ${renamed.title} / ${renamed.status}, '
+    'id unchanged: ${renamed.id == terminal.id}',
   );
 
-  final s3 = t.sensors.first.copyWith(
+  // ── copyWith on Sensor: direct construction, AND the actual proof that
+  //    colliding bool/enum fields still resolve to the right one ────────
+  //
+  // `isActive`, `isCalibrated`, `isFaulty`, and `isOffline` are ALL
+  // `false` on this instance, and `primaryGrade`/`secondaryGrade` are
+  // BOTH `Grade.a` — genuine collisions across four bool fields and two
+  // fields of the same enum type. If `$.set((m) => m.field, value)`
+  // resolved to the wrong field here, one of the *other* three bools (or
+  // the *other* grade) would flip instead of the one actually named.
+  final firstSensor = terminal.sensors.first;
+  final flagged = firstSensor.copyWith(
     ($) => [
-      $.set((m) => m.line, 139.0),
-      $.set((m) => m.space, true),
-      $.set((m) => m.krope, false),
-      $.set((m) => m.boss2, Greed.user),
+      $.set((m) => m.isFaulty, true),
+      $.set((m) => m.secondaryGrade, Grade.c),
     ],
   );
+
   print(
-    'sensor value: ${s3.value}, line: ${s3.line}, space ${s3.space} krope ${s3.krope}',
+    'only isFaulty flipped -> isActive=${flagged.isActive} '
+    'isCalibrated=${flagged.isCalibrated} isFaulty=${flagged.isFaulty} '
+    'isOffline=${flagged.isOffline}',
+  );
+  print(
+    'only secondaryGrade changed -> primaryGrade=${flagged.primaryGrade} '
+    'secondaryGrade=${flagged.secondaryGrade}',
+  );
+  // isActive / isCalibrated / isOffline must still print `false`, and
+  // primaryGrade must still print `Grade.a` — that's the proof.
+
+  // ── The resolved-field form needs none of the above disambiguation —
+  //    `$.field.set(value)` already *is* the target `Field` ─────────────
+  final calibrated = firstSensor.copyWith(
+    ($) => [$.set((m) => m.isCalibrated, true)],
+  );
+  print(
+    'calibrated=${calibrated.isCalibrated}, '
+    'isFaulty unchanged=${calibrated.isFaulty == firstSensor.isFaulty}',
   );
 
-  print('round-trip: ${t == Terminal.fromJson(raw)}');
-  print('changed: ${t == u}');
+  print(terminal.toJson());
+  print(flagged.toJson());
 
-  // The toJson() method is implemented automatically without code generation!
-  print(s3.toJson());
-  print(s2.toJson());
-  print(t.toJson());
-
-  // toJson()/== are built from `props`, so they work just as correctly on
-  // a Terminal built by calling its constructor directly — no fromJson
-  // involved at all — as long as `props` lists the same fields, in the
-  // same order, as `fields` (and the constructor).
+  // ── toJson()/== are built from `props`, so they're correct even for an
+  //    instance built by calling the constructor directly — no fromJson
+  //    involved at all — as long as `props` lists the same fields, in the
+  //    same order, as `fields` (and the constructor) ────────────────────
   final direct = Terminal(1, 'Direct', DeviceStatus.active, const [], const {});
-  final directUpdated = direct.copyWith(
+  final directRenamed = direct.copyWith(
     ($) => [$.set((m) => m.title, 'Direct Updated')],
   );
   print('direct-construction toJson: ${direct.toJson()}');
-  print('direct-construction copyWith: ${directUpdated.toJson()}');
+  print('direct-construction copyWith: ${directRenamed.toJson()}');
 }
