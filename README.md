@@ -36,8 +36,9 @@ final class UserSchema extends Schema<User> {
 
 ```dart
 final user = User.fromJson({'user_id': 7, 'full_name': 'Ada', 'email_address': null});
-final renamed = user.copyWith(($) => [$.name.set('Ada Lovelace')]);
+final renamed = user.copyWith(($) => [$.set((m) => m.name, 'Ada Lovelace')]);
 print(user.toJson()); // {'user_id': 7, 'full_name': 'Ada', 'email_address': null}
+print(renamed.toJson()); // {'user_id': 7, 'full_name': 'Ada Lovelace', 'email_address': null}
 ```
 
 That's the whole API surface for a simple model. Everything below is what
