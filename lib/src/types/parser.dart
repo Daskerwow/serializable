@@ -14,3 +14,4 @@ export 'parsers/collections.dart';
 export 'parsers/model_parser.dart';
 export 'parsers/nested_access.dart';
 export 'parsers/combinators.dart';
+export 'field_builder.dart';

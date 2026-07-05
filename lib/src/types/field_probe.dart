@@ -66,6 +66,30 @@ Enum _firstOtherThan(List<Enum> domain, Enum current) {
   return current;
 }
 
+/// Re-tags [to] with whatever enum domain is currently attached to [from] —
+/// a no-op if [from] has none.
+///
+/// Needed specifically by the fluent builder methods on [Field]
+/// (`FieldBuilderX` in field_builder.dart — `.getter(...)`, `.serializer(...)`,
+/// `.nullable(...)`): each one, being immutable, constructs a *new* `Field`
+/// object rather than mutating `this`. Since [_enumDomains] is keyed by
+/// object identity, that new object starts out with no domain tagged at
+/// all — even if `this` (the field it was chained off of) already had one
+/// attached via an earlier `.parser(enumOrFirst(...))` step. Left
+/// unaddressed, that's a silent correctness regression: `Schema.set`'s
+/// same-typed-enum-field disambiguation (see `ModelBinder._resolveSelector`
+/// in model_type.dart) depends on this metadata reaching the *exact* field
+/// object that ends up in `Schema.all`, and a chain like
+/// `field<Grade>('g').parser(enumOrFirst(Grade.values)).getter((m) => m.g)`
+/// would otherwise lose it at the very last step. `.parser(...)` itself
+/// doesn't need this helper — it already re-attaches the domain fresh from
+/// whatever new raw parser it's given, via `buildField`'s own call to
+/// [attachEnumDomain].
+void copyEnumDomain<M, R>(Field<M, R> from, Field<M, R> to) {
+  final domain = _enumDomains[from];
+  if (domain != null) _enumDomains[to] = domain;
+}
+
 /// A number far outside any plausible real-world value, injective in
 /// [seed] — distinct seeds can never coerce to equal output below.
 int _salt(int seed) => -(seed + 1) * 1000000007;

@@ -38,10 +38,10 @@ abstract base class Schema<M> {
   /// though a model should pick one style consistently.
   Field<M, R> field<R>(
     String jsonKey, {
+    R Function(M)? getter,
     R Function(Object?)? parser,
     Serializer<R>? serializer,
     bool? nullable,
-    R Function(M)? getter,
   }) => buildField<M, R>(
     jsonKey: jsonKey,
     parser: parser,

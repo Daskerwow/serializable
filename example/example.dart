@@ -134,30 +134,21 @@ class Terminal extends Equatable with Serializable<Terminal> {
 final class TerminalSchema extends Schema<Terminal> {
   @override
   ListFieldOf<Terminal> get all => [
-    't_id'.field((m) => m.id),
-    'display_name'.field((m) => m.title, parser: stringOrDefault('Unnamed')),
-    'device_status'.field(
-      (m) => m.status,
-      parser: enumOrFirst(DeviceStatus.values),
-      serializer: enumToJson,
-    ),
-    'attached_sensors'.field(
-      (m) => m.sensors,
-      parser: listOf(modelOf(Sensor.fromJson)),
-    ),
-    // `access_keys` is an Enum-keyed Map — the one case that genuinely
-    // needs the explicit `<Terminal, Map<AccessLevel, String>>` type
-    // arguments AND a custom serializer. Without the serializer, the
-    // default would key the JSON by `AccessLevel.write.toString()`
-    // ("AccessLevel.write") instead of `.name` ("write"), and
-    // `enumOrFirst` wouldn't recognize that key coming back in on a
-    // later `copyWith` — silently substituting its fallback instead of
-    // raising an error. See the README's "Gotchas" section.
-    'access_keys'.field<Terminal, Map<AccessLevel, String>>(
-      (m) => m.tokens,
-      parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
-      serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
-    ),
+    field<int>('t_id').get((m) => m.id),
+    field<String>(
+      'display_name',
+    ).get((m) => m.title).parse(stringOrDefault('Unnamed')),
+    field<DeviceStatus>('device_status')
+        .get((m) => m.status)
+        .parse(enumOrFirst(DeviceStatus.values))
+        .serialize(enumToJson),
+    field<List<Sensor>>(
+      'attached_sensors',
+    ).get((m) => m.sensors).parse(listOf(modelOf(Sensor.fromJson))),
+    field<Map<AccessLevel, String>>('access_keys')
+        .get((m) => m.tokens)
+        .parse(mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty))
+        .serialize((map) => {for (final e in map.entries) e.key.name: e.value}),
   ];
 }
 
