@@ -34,6 +34,16 @@
 //      with the field's nullable flag, which created inconsistent behavior.
 //      Now _smartParse always works with a specific type R, and the nullable
 //      logic is centralized in SerializableHelpers.fromJson.
+//
+//   3. `getter` is a named parameter, not a required positional one.
+//      `field<M, R>(R Function(M) getter, {...})` compiled, but made every
+//      call site above that omits a getter (`'name'.field<User, String>()`)
+//      a compile error, despite that being exactly what this file's own
+//      examples (and the README) show. Dart also does not allow an
+//      *optional* positional parameter to sit alongside named ones in the
+//      same signature, so "optional and positional" was never reachable
+//      here to begin with — `getter` is now `getter: (m) => m.x`, an
+//      optional named parameter, matching `Schema.field` in model_type.dart.
 // =============================================================================
 
 import 'errors.dart';
@@ -74,7 +84,7 @@ import 'types/parser.dart';
 /// the box and a field typed `T` is required out of the box. Pass
 /// `nullable:` explicitly only to override that default.
 ///
-/// **[getter]** — optional leading positional argument (`.field((m) => m.x)`).
+/// **[getter]** — optional named argument (`.field(getter: (m) => m.x)`).
 /// `Field` still only *describes* the JSON side (key, parser, serializer)
 /// and carries no per-instance state of its own — but attaching a getter
 /// lets [Serializable]'s default `props` implementation read this field's
@@ -83,8 +93,8 @@ import 'types/parser.dart';
 /// declare `props` yourself, exactly as you would for plain `Equatable`.
 /// See [Serializable] in serializable_model.dart for both styles.
 extension FieldStringX on String {
-  Field<M, R> field<M, R>(
-    R Function(M) getter, {
+  Field<M, R> field<M, R>({
+    R Function(M)? getter,
     R Function(Object?)? parser,
     Object? Function(R)? serializer,
     bool? nullable,

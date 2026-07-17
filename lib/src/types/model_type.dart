@@ -18,7 +18,15 @@
 // mapping, which this library owns) and the domain layer (value-object
 // semantics, which a model's own immutable `copyWith` belongs to). Write
 // `copyWith` by hand on the domain entity instead — it's a handful of
-// lines and has no dependency on this library at all.
+// lines and has no dependency on this library at all. See the README's
+// "Writing your own copyWith" section for a worked example.
+//
+// `ModelType` only ever needs `M`, not the concrete `Schema<M>` subtype —
+// `schema` below is typed as the erased `Schema<M>`, and `all` is all
+// `ModelType.call` ever reads from it. A second type parameter for the
+// concrete schema type existed in older versions to support `ModelBinder`
+// (which needed compile-time access to a schema's named field members,
+// e.g. `$.title`); now that `ModelBinder` is gone, so is that parameter.
 // =============================================================================
 
 import '../extension.dart';
@@ -74,8 +82,7 @@ abstract base class Schema<M> {
 ///
 /// Used as a single entry point for deserialization:
 /// ```dart
-/// // M is specified explicitly — Dart cannot infer it from the positional constructor.
-/// static final $ = ModelType<Sensor, SensorSchema>(Sensor.new, SensorSchema());
+/// static final $ = ModelType<Sensor>(Sensor.new, SensorSchema());
 ///
 /// // Deserialization:
 /// final sensor = Sensor.$.call(json);

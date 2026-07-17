@@ -12,7 +12,10 @@ import '../types.dart';
 @pragma('vm:prefer-inline')
 Parser<T> modelOf<T>(T Function(Json) fromJson) =>
     (Object? v) => switch (v) {
-      final Map m => fromJson(Json.from(m)),
+      // A typed *view* via Map.cast, not a copy via Map.from — the map is
+      // only ever read from fromJson, matching the same reasoning as
+      // SerializableHelpers._readPath (see serializable_model.dart).
+      final Map m => fromJson(m.cast<String, Object?>()),
       _ => throw FormatException(
         'modelOf<$T>: expected a Map, got ${v?.runtimeType}',
       ),
@@ -23,7 +26,7 @@ Parser<T> modelOf<T>(T Function(Json) fromJson) =>
 @pragma('vm:prefer-inline')
 Parser<T?> modelOrNull<T>(T Function(Json) fromJson) =>
     (Object? v) => switch (v) {
-      final Map m => fromJson(Json.from(m)),
+      final Map m => fromJson(m.cast<String, Object?>()),
       _ => null,
     };
 
@@ -38,7 +41,7 @@ Parser<T> modelOrThrow<T>(T Function(Json) fromJson) => modelOf(fromJson);
 /// Parses an arbitrary JSON object as `Map<String, Object?>`.
 @pragma('vm:prefer-inline')
 Json? jsonObjectOrNull(Object? v) => switch (v) {
-  final Map m => Json.from(m),
+  final Map m => m.cast<String, Object?>(),
   _ => null,
 };
 

@@ -20,6 +20,12 @@
 // chain: each method below is called on an already-fully-typed `Field<M,
 // R>` and returns another one.
 //
+// Note this chain's `.get(getter)` takes the getter *positionally* —
+// unlike `FieldStringX.field`'s `getter:` (a named parameter, forced by
+// Dart's rule that a function can't mix optional-positional and named
+// parameters; see extension.dart). Different call site, no such
+// constraint here, since `.get` takes nothing else.
+//
 // ─── Why every method returns a *new* Field ──────────────────────────────────
 // `Field` is immutable by design (see field.dart's header) — none of the
 // methods below mutate `this`; each builds a fresh `Field<M, R>` carrying

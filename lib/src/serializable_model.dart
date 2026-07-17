@@ -32,15 +32,15 @@
 //      constructed, with no per-field getter required. A length mismatch
 //      between `fields` and `props`, or a per-slot type mismatch (see
 //      `Field.acceptsValue`), is now a clear `StateError` — in every build
-//      mode, including release, not just a debug-only `assert` — catching
-//      many (not all) cases of the two lists being out of order.
+//      mode, including release, not just a debug-only `assert`.
 //
 //   5. Removed `copyWith` from this library entirely (along with the
 //      `undefined` sentinel, `Schema.set`, and `ModelBinder` in
 //      model_type.dart). This library owns JSON ⇄ model mapping only; a
 //      model's own immutable `copyWith` is domain-layer value-object
 //      logic and belongs on the domain entity, written by hand — see
-//      model_type.dart's header for the full reasoning.
+//      model_type.dart's header for the full reasoning, and the README's
+//      "Writing your own copyWith" section for a worked example.
 // =============================================================================
 
 import 'package:equatable/equatable.dart';
@@ -137,7 +137,7 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
 ///
 ///   const User(this.id, this.name, this.address);
 ///
-///   static final $ = ModelType<User, UserSchema>(User.new, UserSchema());
+///   static final $ = ModelType<User>(User.new, UserSchema());
 ///
 ///   @override
 ///   ListFieldOf<User> get fields => $.schema.all;
@@ -419,7 +419,7 @@ final class SerializableHelpers {
   /// | DateTime           | ISO-8601 string (toIso8601String)     |
   /// | Duration           | milliseconds (int)                    |
   /// | Uri                | string                                |
-  /// | BigInt             | string                                |
+  /// | BigInt              | string                                |
   /// | Enum               | `.name`                               |
   /// | List / Set         | recursively serialized List           |
   /// | Map                | keys via `.toString()`, values recursively |

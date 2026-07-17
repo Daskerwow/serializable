@@ -1,6 +1,84 @@
 # Changelog
 
-## 0.3.0 — Optional getter-derived `props`, and three correctness fixes
+## 5.0.0 — Remove `copyWith`, `Schema.set`, and `ModelBinder`; fix the `getter:` regression
+
+`copyWith` is no longer part of this library's public API. json_forge maps
+JSON ⇄ model and nothing else; a model's `copyWith` is domain-layer,
+value-object logic, and it's a handful of lines to write by hand once you
+already have `toJson`/`fromJson`/`props` for free — see the README's
+"Writing your own copyWith" section for a worked example.
+
+### Breaking
+
+- Removed `Schema.set`, `ModelBinder`, `FieldsBuilder<S>`, `FieldPatch`,
+  and the `undefined` sentinel entirely. There is no library-provided
+  `copyWith` path anymore — `ModelType` only ever powers `fromJson`.
+- `ModelType<M, S extends Schema<M>>` is now `ModelType<M extends
+  SerializableModelI<M>>` — the second type parameter is gone.
+  `ModelType.schema` was always typed as the erased `Schema<M>`, never the
+  concrete `S` — nothing except `bind`/`ModelBinder` (both removed above)
+  ever actually needed `S`. Update construction call sites:
+  ```dart
+  // before
+  static final $ = ModelType<User, UserSchema>(User.new, UserSchema());
+  // after
+  static final $ = ModelType<User>(User.new, UserSchema());
+  ```
+
+### Fixed
+
+- **`FieldStringX.field` (the top-level `String.field()` extension) still
+  had `getter` as a required positional parameter**, even though the
+  `4.1.0` entry below already claimed this exact regression was fixed,
+  and every usage example in that same file's own header comment
+  (`'name'.field<User, String>()`, no arguments at all) assumed it was
+  optional. It wasn't: Dart doesn't allow mixing an optional-positional
+  parameter with named ones in a single signature, so "optional *and*
+  positional, alongside `parser:`/`serializer:`/`nullable:`" was never
+  actually reachable here — the 4.1.0 fix could only have made it
+  optional by dropping it from the parameter list, and it didn't. `getter`
+  is now a named parameter, `getter: (m) => m.x`, matching `Schema.field`
+  in `model_type.dart`, which had this right all along. Update call sites
+  that passed a getter positionally (`'sensor_uid'.field((m) => m.uid)`)
+  to the named form (`'sensor_uid'.field(getter: (m) => m.uid)`).
+- The doc comments on `ModelType` (`model_type.dart`) and `Serializable`
+  (`serializable_model.dart`) demonstrated construction as
+  `ModelType<Sensor, SensorSchema>(...)` / `ModelType<User,
+  UserSchema>(...)` — the two-type-parameter form, which hasn't compiled
+  since `S` was dropped from `ModelType`. Both now show the correct
+  `ModelType<Sensor>(...)` / `ModelType<User>(...)`.
+- **README.md's main example separated `Schema.all` list entries with
+  `;` instead of `,`** (`'user_id'.field(...); 'full_name'.field(...);`)
+  — not valid Dart list-literal syntax, so the example didn't compile.
+- `modelOf`/`modelOrNull`/`jsonObjectOrNull` copied the incoming `Map` via
+  `Map.from` before handing it to a nested model's `fromJson` (or
+  returning it as a `Json`) — the same needless O(map size) copy that
+  `_readPath` was already fixed, in `4.1.0` below, to avoid, for a value
+  that's only ever read from afterward, never mutated. Replaced with
+  `Map.cast`, an O(1) typed view, matching `_readPath`'s reasoning.
+- **This file's own version ordering was wrong.** The entry now numbered
+  `4.1.0` below was previously labeled `0.3.0` and listed *above* — i.e.
+  more recent than — `4.0.0`, `3.0.0`, `2.0.0`, and `1.0.0`, despite
+  `0.3.0 < 4.0.0` and despite that entry's own text describing itself as
+  building on `4.0.0` ("the counterpart to 4.0.0's requirement").
+  Renumbered to `4.1.0` and left in its correct, chronological position
+  below.
+- README.md documented `copyWith`, `ModelBinder`, `Schema.set`,
+  `FieldsBuilder<S>`, and the `undefined` sentinel throughout its
+  examples, core-concepts table, and API reference — none of which have
+  existed since this version (or, per the entry below, arguably ever
+  correctly). Rewritten to match the library's actual public surface, as
+  already correctly described by `json_forge.dart`'s own library doc
+  comment and `model_type.dart`'s header comment.
+
+## 4.1.0 — Optional getter-derived `props`, and three correctness fixes
+
+> **Note:** The `copyWith`-related additions described in this entry —
+> `Schema.set`, the allocation-free `copyWith` path unlocked by full
+> `getter:` coverage, `field_probe.dart`, and the `enumOr*` `Expando`
+> tagging that supported selector resolution — were all removed in
+> `5.0.0` above. The `getter:` parameter itself, and the `props` it
+> derives, are unaffected and still current.
 
 Adds back an *optional* way to satisfy `props` without writing it by hand
 — the counterpart to 4.0.0's requirement that every model declare it
@@ -20,35 +98,37 @@ final class SensorSchema extends Schema<Sensor> {
 // Sensor no longer needs to override `props` at all.
 ```
 
-The same `getter:` also unlocks an allocation-free `copyWith` path: when
-*every* field in a schema has one, `ModelBinder` builds the updated
+The same `getter:` also unlocked an allocation-free `copyWith` path: when
+*every* field in a schema had one, `ModelBinder` built the updated
 instance directly from current getter values + patches, instead of
-round-tripping through `toJson()`/`fromJson()`. And it enables
+round-tripping through `toJson()`/`fromJson()`. It also enabled
 `Schema.set((m) => m.field, value)` — a selector-based patch, resolved
 against a synthetic probe instance rather than a `Field` reference, so
-`$.set((m) => m.title, 'x')` works even for models assembled with inline
+`$.set((m) => m.title, 'x')` worked even for models assembled with inline
 lambdas. New internal module: `field_probe.dart` (probe seeding,
 finite-domain disambiguation for `bool`/`Enum` collisions).
 
 ### Added
 
 - `getter:` parameter on `Schema.field` and `String.field()`.
-- `Schema.set(selector, value)` — deferred, selector-resolved patches,
-  alongside the existing `$.field.set(value)` resolved form.
-- `enumOrNull`/`enumOrDefault`/`enumOrFirst`/`enumOrLast`/`enumOrThrow`
+- ~~`Schema.set(selector, value)` — deferred, selector-resolved patches,
+  alongside the existing `$.field.set(value)` resolved form.~~ Removed in
+  `5.0.0`.
+- ~~`enumOrNull`/`enumOrDefault`/`enumOrFirst`/`enumOrLast`/`enumOrThrow`
   now tag the parser they return with the `values` list it was built
   from (via an `Expando`), so `ModelBinder` can recover a field's enum
-  domain purely from the parser it already has — no schema change
-  needed to make selector resolution work for `enumOr*`-declared fields.
+  domain purely from the parser it already has.~~ Removed in `5.0.0`
+  along with `ModelBinder` itself.
 
 ### Fixed
 
 - **`String.field()`'s `getter` was a required positional parameter**,
   contradicting this same file's own doc comments (`'name'.field<User,
   String>()` — no positional argument at all) and 3.0.0's changelog entry
-  above, which describes exactly this as a fixed bug once already. It
-  regressed back to required when `getter:` was reintroduced. Now
-  properly optional.
+  below, which describes exactly this as a fixed bug once already. It
+  regressed back to required when `getter:` was reintroduced. Believed
+  fixed here — **it wasn't**; see `5.0.0` above for why, and for the fix
+  that actually stuck.
 - **`ModelBinder._resolveSelector` only checked the first colliding
   field's enum domain**, not every colliding field's. Two same-valued
   enum fields could fail to resolve via `Schema.set` even when a *second*
@@ -56,6 +136,7 @@ finite-domain disambiguation for `bool`/`Enum` collisions).
   `enumOr*` combinator — contradicting this method's own documented
   contract, which only promises failure when *no* colliding field has a
   known domain. Domain lookup now scans every match.
+  > **Superseded in 5.0.0** — `Schema.set` and `ModelBinder` are gone.
 - **`SerializableHelpers._readPath` copied an entire nested `Map` via
   `Map.from` at every level of `at(...)` nesting, for every field
   independently.** Six fields sharing one `at('stats', ...)` prefix
@@ -74,6 +155,8 @@ finite-domain disambiguation for `bool`/`Enum` collisions).
   flagging the disagreement — so it only ever surfaces here. The error
   message now lists every argument as `jsonKey: runtimeType = value`.
   Applies to `fromJson` and to all three `ModelBinder` construction paths.
+  > `ModelBinder`'s two construction paths are gone as of `5.0.0`; the
+  > diagnostic still applies to `fromJson`.
 - **`AccessLevel`-keyed `Map` fields (`Map<Enum, V>`) needed an explicit
   `.name`-based `serializer:`** that the test suite's `Terminal` fixture
   was missing (`example.dart`'s equivalent field already had it). Without
@@ -175,7 +258,7 @@ JSON.
 
 ## 3.0.0 — `Schema` classes, replacing the Record requirement
 
-`ModelType<M, S>` now takes a **`Schema<M>` instance** instead of a bare
+`ModelType<M, S>` now took a **`Schema<M>` instance** instead of a bare
 `List<Field<M, Object?>>`, with `S` constrained to `extends Schema<M>`. A
 `Schema` is a small class you extend, declaring each field once as a
 `late final` member via `field<R>(jsonKey, ...)`, with a required `all`
@@ -197,6 +280,11 @@ late final copyWith = $.bind(this);
 ```dart
 sensor.copyWith(($) => [$.value.set(99.9)]); // $.value — a real member access
 ```
+
+> **Note:** `ModelType`'s second type parameter (`S`) described below was
+> removed again in `5.0.0`, once `copyWith`/`bind` (the only members that
+> ever needed it) were removed. `ModelType<M, S>` here is accurate history
+> for this version, not the current signature.
 
 ### Why
 

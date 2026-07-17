@@ -68,22 +68,25 @@ class Sensor extends Equatable with Serializable<Sensor> {
 final class SensorSchema extends Schema<Sensor> {
   @override
   ListFieldOf<Sensor> get all => [
-    'sensor_uid'.field((m) => m.uid),
-    'temperature'.field((m) => m.temperature),
-    'humidity'.field((m) => m.humidity),
-    'is_active'.field((m) => m.isActive),
-    'is_calibrated'.field((m) => m.isCalibrated),
-    'is_faulty'.field((m) => m.isFaulty),
-    'is_offline'.field((m) => m.isOffline),
+    'sensor_uid'.field(getter: (m) => m.uid),
+    'temperature'.field(getter: (m) => m.temperature),
+    'humidity'.field(getter: (m) => m.humidity),
+    'is_active'.field(getter: (m) => m.isActive),
+    'is_calibrated'.field(getter: (m) => m.isCalibrated),
+    'is_faulty'.field(getter: (m) => m.isFaulty),
+    'is_offline'.field(getter: (m) => m.isOffline),
     'primary_grade'.field(
-      (m) => m.primaryGrade,
+      getter: (m) => m.primaryGrade,
       parser: enumOrFirst(Grade.values),
     ),
     'secondary_grade'.field(
-      (m) => m.secondaryGrade,
+      getter: (m) => m.secondaryGrade,
       parser: enumOrFirst(Grade.values),
     ),
-    'history_logs'.field((m) => m.history, parser: listOf(dateTimeOrEpoch)),
+    'history_logs'.field(
+      getter: (m) => m.history,
+      parser: listOf(dateTimeOrEpoch),
+    ),
   ];
 }
 
