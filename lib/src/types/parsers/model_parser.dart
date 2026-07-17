@@ -48,7 +48,7 @@ Json? jsonObjectOrNull(Object? v) => switch (v) {
 @pragma('vm:prefer-inline')
 Json jsonObjectOrEmpty(Object? v) => jsonObjectOrNull(v) ?? const {};
 
-Parser<Json> jsonObjectOrDefault(Map<String, Object?> fallback) =>
+Parser<Json> jsonObjectOrDefault(Json fallback) =>
     (Object? v) => jsonObjectOrNull(v) ?? fallback;
 
 @pragma('vm:prefer-inline')
