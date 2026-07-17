@@ -38,7 +38,6 @@
 
 import 'errors.dart';
 import 'types/field.dart';
-import 'types/field_probe.dart' show attachEnumDomain;
 import 'types/parser.dart';
 
 /// Extension on [String] for declarative, top-level definition of a model
@@ -113,7 +112,7 @@ Field<M, R> buildField<M, R>({
   // explicitly-passed `nullable:` always wins over this default.
   final resolvedNullable = nullable ?? (null is R);
 
-  final field = Field<M, R>(
+  return Field<M, R>(
     jsonKey: jsonKey,
     nesting: nesting,
     nullable: resolvedNullable,
@@ -149,9 +148,6 @@ Field<M, R> buildField<M, R>({
       );
     },
   );
-
-  attachEnumDomain(field, parser);
-  return field;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

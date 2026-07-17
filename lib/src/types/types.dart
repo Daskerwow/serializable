@@ -13,8 +13,6 @@
 //                  that return dynamic).
 // =============================================================================
 
-import 'field_patch.dart';
-import 'model_type.dart';
 import 'field.dart';
 
 /// `Object? → T`
@@ -29,14 +27,6 @@ typedef Parser<T> = T Function(Object? value);
 /// Serializer converts a Dart value back into a JSON primitive,
 /// List, Map, or nested object.
 typedef Serializer<T> = Object? Function(T value);
-
-/// Patch builder function for [copyWith] via [ModelBinder].
-///
-/// Takes the field schema `$` and returns a list of changes.
-/// ```dart
-/// sensor.copyWith(($) => [$.value.set(42.0)]);
-/// ```
-typedef FieldsBuilder<T> = Iterable<FieldPatch> Function(T $);
 
 /// Convenient alias: a field with a type-erased value type.
 ///

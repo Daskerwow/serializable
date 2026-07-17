@@ -25,47 +25,28 @@
 //      `readErased`). It only ever got populated by `fromJson`, so `toJson()`
 //      and `==` silently went blank — null for every field, no exception —
 //      for any instance built via its own constructor instead of
-//      `fromJson`/`copyWith` (and threw a raw cast TypeError on a custom
-//      `serializer` instead, since `null as R` is unsound for non-nullable
-//      `R`). `toJson()` is now built from `fields` + `props` (see
-//      [Serializable] below) — real values, regardless of how the instance
-//      was constructed, with no per-field getter required. A length
-//      mismatch between `fields` and `props`, or a per-slot type mismatch
-//      (see `Field.acceptsValue`), is now a clear `StateError` — in every
-//      build mode, including release, not just a debug-only `assert` —
-//      catching many (not all) cases of the two lists being out of order.
+//      `fromJson` (and threw a raw cast TypeError on a custom `serializer`
+//      instead, since `null as R` is unsound for non-nullable `R`).
+//      `toJson()` is now built from `fields` + `props` (see [Serializable]
+//      below) — real values, regardless of how the instance was
+//      constructed, with no per-field getter required. A length mismatch
+//      between `fields` and `props`, or a per-slot type mismatch (see
+//      `Field.acceptsValue`), is now a clear `StateError` — in every build
+//      mode, including release, not just a debug-only `assert` — catching
+//      many (not all) cases of the two lists being out of order.
+//
+//   5. Removed `copyWith` from this library entirely (along with the
+//      `undefined` sentinel, `Schema.set`, and `ModelBinder` in
+//      model_type.dart). This library owns JSON ⇄ model mapping only; a
+//      model's own immutable `copyWith` is domain-layer value-object
+//      logic and belongs on the domain entity, written by hand — see
+//      model_type.dart's header for the full reasoning.
 // =============================================================================
 
 import 'package:equatable/equatable.dart';
 
 import 'errors.dart';
 import 'types/types.dart';
-
-// =============================================================================
-// Sentinel — marker for "value not passed"
-// =============================================================================
-
-/// Marker indicating "parameter not passed — keep the original value".
-///
-/// Conceptually different from `null`:
-/// ```dart
-/// user.copyWith(address: null)   // explicitly sets address to null
-/// user.copyWith(name: 'Bob')     // address remains the same
-/// ```
-///
-/// Used only in copyWith signatures. Check via [identical]:
-/// ```dart
-/// if (!identical(value, undefined)) { /* value was passed */ }
-/// ```
-const Object undefined = _Undefined();
-
-/// Internal singleton class for the marker. Private — cannot be instantiated outside.
-final class _Undefined {
-  const _Undefined();
-
-  @override
-  String toString() => 'undefined';
-}
 
 // =============================================================================
 // SerializableModelI — model interface
@@ -77,8 +58,8 @@ final class _Undefined {
 /// [toJson] — built from [fields] and [props] together. [props] is the
 /// standard `Equatable` list, and it's what makes [toJson] (and
 /// `==`/`hashCode`, via `Equatable`) correct for *any* instance, not just
-/// ones built via `fromJson`/`copyWith`. It can either be written by hand
-/// (as in plain `Equatable` usage) or derived automatically from `getter:`
+/// ones built via `fromJson`. It can either be written by hand (as in
+/// plain `Equatable` usage) or derived automatically from `getter:`
 /// closures on each field — see [Serializable] for both options.
 ///
 /// ### Field Requirements ([fields] and [props])
@@ -146,8 +127,8 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
 ///
 /// ### Full Model Example (recommended style: Schema + ModelType)
 ///
-/// See the package README for the complete picture (including `copyWith`
-/// via [ModelBinder]); the shape of a single model is:
+/// See the package README for the complete picture; the shape of a single
+/// model is:
 /// ```dart
 /// class User extends Equatable with Serializable<User> {
 ///   final int id;
@@ -165,7 +146,9 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
 ///   // `getter:`, so Serializable's default derives it for you.
 ///
 ///   factory User.fromJson(Json json) => $.call(json);
-///   User copyWith(FieldsBuilder<UserSchema> updates) => $.bind(this)(updates);
+///
+///   // No copyWith here — this library only maps JSON ⇄ model. Write
+///   // copyWith by hand on the domain entity instead.
 /// }
 ///
 /// final class UserSchema extends Schema<User> {
@@ -204,10 +187,10 @@ mixin Serializable<M extends SerializableModelI<M>> on Equatable
 // SerializableHelpers — serialization engine
 // =============================================================================
 
-/// Static engine: deserialization, serialization, copyWith.
+/// Static engine: deserialization and serialization.
 ///
 /// Not intended for direct inheritance. Use via the [Serializable] mixin
-/// and static methods [fromJson] / [copyWith].
+/// and the static method [fromJson].
 final class SerializableHelpers {
   SerializableHelpers._();
 
@@ -338,83 +321,6 @@ final class SerializableHelpers {
   }
 
   // ===========================================================================
-  // copyWith
-  // ===========================================================================
-
-  /// Creates a copy of [instance] with selectively replaced fields.
-  ///
-  /// ### Algorithm
-  /// 1. Serializes [instance] via `toJson()`.
-  /// 2. For each [patch] entry with a value other than [undefined]:
-  ///    - Applies [_serialize] to the value (Dart object → JSON primitive).
-  ///    - Writes the result to JSON by `jsonKey`.
-  /// 3. Deserializes the updated JSON back into [R] via [fromJson].
-  ///
-  /// ### Serialization Contract
-  /// [_serialize] and parsers must be consistent:
-  ///   - DateTime → ISO-8601 string → dateTimeOrNull understands ISO-8601 ✓
-  ///   - Enum     → `.name`         → enumOrDefault compares by name ✓
-  ///   - Model    → `.toJson()`     → modelOf(fromJson) ✓
-  ///
-  /// ### Advantages over Symbol-based approach
-  /// - No Symbol — does not break with `--obfuscate`.
-  /// - No positional list — adding a field does not shift arguments.
-  /// - Order-independence — patch-Map is indexed by jsonKey.
-  ///
-  /// ### Values in [patch]
-  /// | Value           | Effect                                          |
-  /// |-----------------|-------------------------------------------------|
-  /// | `undefined`     | field is not changed (original value)           |
-  /// | `null`          | field is set to null (only for nullable)        |
-  /// | any other       | field is overwritten by this value              |
-  ///
-  /// Keys in [patch] are **jsonKey** (strings from JSON), not Dart names.
-  ///
-  /// Prefer [ModelBinder] (`model.copyWith(($) => [$.field.set(value)])`)
-  /// when a [Schema] is available — it's compile-time checked per field
-  /// (no stringly-typed `jsonKey`s, no `undefined` sentinel to remember)
-  /// and is the path every model in this package actually uses. This
-  /// method is kept for models built the plain-[Field]-list way, without a
-  /// [Schema].
-  ///
-  /// Unlike [ModelBinder], this always goes through the JSON round-trip,
-  /// even when every field has a `getter`. The reason is [patch]'s type:
-  /// `Json` (`Map<String, Object?>`) makes no compile-time promise that
-  /// `entry.value` is already the right Dart type for that field — that's
-  /// exactly what [FieldPatch]'s `.set(R value)` guarantees and this loose
-  /// Map doesn't — so re-running it through the field's parser is a real
-  /// validation step here, not redundant work to skip.
-  static R copyWith<R extends SerializableModelI<R>>(
-    R instance,
-    Json patch,
-    Function factory,
-  ) {
-    // Start with the current JSON state of the model.
-    final json = instance.toJson();
-
-    // jsonKey → field, so a patch entry can find its nesting (from at()).
-    // Without this, a patch for a field declared via at('meta', ...) used
-    // to be written as a flat json[jsonKey] instead of
-    // json['meta'][jsonKey] — silently landing next to, rather than
-    // inside, the nested object toJson() actually produced.
-    final byKey = {for (final f in instance.fields) f.jsonKey: f};
-
-    for (final entry in patch.entries) {
-      // undefined = "do not touch". Skip such entries.
-      if (identical(entry.value, undefined)) continue;
-
-      // Serialize the Dart value into a JSON-compatible type.
-      // This ensures consistency with parsers during repeated fromJson.
-      final serialized = _serialize(entry.value);
-      final nesting = byKey[entry.key]?.nesting ?? const <String>[];
-      _writeDeep(json, [...nesting, entry.key], serialized);
-    }
-
-    // Full deserialization — all parsers and type checks are executed.
-    return fromJson<R>(json, instance.fields, factory);
-  }
-
-  // ===========================================================================
   // props (internal) — backs Serializable's default `props` implementation
   // ===========================================================================
 
@@ -518,10 +424,6 @@ final class SerializableHelpers {
   /// | List / Set         | recursively serialized List           |
   /// | Map                | keys via `.toString()`, values recursively |
   /// | num / bool / String| unchanged                             |
-  ///
-  /// Public alias: [serializeValue] — for use in [ModelBinder].
-  static Object? serializeValue(Object? v) => _serialize(v);
-
   static Object? _serialize(Object? v) => switch (v) {
     null => null,
     // Models are serialized via their own toJson.
@@ -584,12 +486,8 @@ final class SerializableHelpers {
   /// Example: `keys=['meta', 'stats', 'count']`, `value=42`
   ///   → `map['meta']['stats']['count'] = 42`
   ///
-  /// Public method — used in [ModelBinder] to write patches
-  /// of nested fields (declared via `at(...)`).
-  // ignore: library_private_types_in_public_api
-  static void writeDeep(Json map, List<String> keys, Object? value) =>
-      _writeDeep(map, keys, value);
-
+  /// Internal — used by [_buildJson] to write fields declared via `at(...)`
+  /// to their nested position when serializing.
   static void _writeDeep(Json map, List<String> keys, Object? value) {
     var current = map;
     for (var i = 0; i < keys.length - 1; i++) {
@@ -604,8 +502,8 @@ final class SerializableHelpers {
       // genuine key collision (e.g. two fields, one flat and one nested
       // via at(), sharing a path prefix), not an expected "absent"
       // case. Fail loudly instead of silently dropping the write — a
-      // quiet no-op here previously made a field patch vanish with no
-      // error at all.
+      // quiet no-op here previously made a write vanish with no error at
+      // all.
       if (next is! Map) {
         throw StateError(
           'writeDeep: cannot write to path '

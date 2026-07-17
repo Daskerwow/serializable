@@ -29,24 +29,20 @@ class Sensor extends Equatable with Serializable<Sensor> {
 
   const Sensor(this.uid, this.value, this.history);
 
-  static final $ = ModelType<Sensor, SensorSchema>(Sensor.new, SensorSchema());
+  static final $ = ModelType(Sensor.new, SensorSchema());
 
   @override
   ListFieldOf<Sensor> get fields => $.schema.all;
-
-  @override
-  Props get props => [uid, value, history];
-
   factory Sensor.fromJson(Json json) => $.call(json);
-  Sensor copyWith(FieldsBuilder<SensorSchema> builder) => $.bind(this)(builder);
 }
 
 /// Schema
 final class SensorSchema extends Schema<Sensor> {
-  late final uid = field<String>('sensor_uid');
-  late final value = field<double>('last_value');
+  late final uid = field<String>('sensor_uid', getter: (m) => m.uid);
+  late final value = field<double>('last_value', getter: (m) => m.value);
   late final history = field(
     'history_logs',
+    getter: (m) => m.history,
     parser: listOf<DateTime>(dateTimeOrEpoch),
   );
 
@@ -63,28 +59,19 @@ class Address extends Equatable with Serializable<Address> {
 
   const Address(this.street, this.city, this.country, this.zipCode);
 
-  static final $ = ModelType<Address, AddressSchema>(
-    Address.new,
-    AddressSchema(),
-  );
+  static final $ = ModelType<Address>(Address.new, AddressSchema());
 
   @override
   ListFieldOf<Address> get fields => $.schema.all;
-
-  @override
-  Props get props => [street, city, country, zipCode];
-
   factory Address.fromJson(Json json) => $.call(json);
-  Address copyWith(FieldsBuilder<AddressSchema> builder) =>
-      $.bind(this)(builder);
 }
 
 final class AddressSchema extends Schema<Address> {
   /// Declaration order does not matter here.
-  late final street = field<String>('street_address');
-  late final city = field<String>('city_name');
-  late final country = field<String>('country_name');
-  late final zipCode = field<int>('zip_code');
+  late final street = field<String>('street_address', getter: (m) => m.street);
+  late final city = field<String>('city_name', getter: (m) => m.city);
+  late final country = field<String>('country_name', getter: (m) => m.country);
+  late final zipCode = field<int>('zip_code', getter: (m) => m.zipCode);
 
   /// The order here is exactly the same as in
   /// `Address(this.street, this.city, this.country, this.zipCode)`.
@@ -111,44 +98,32 @@ class User extends Equatable with Serializable<User> {
     this.address,
   );
 
-  static final $ = ModelType<User, UserSchema>(User.new, UserSchema());
+  static final $ = ModelType<User>(User.new, UserSchema());
 
   @override
   ListFieldOf<User> get fields => $.schema.all;
-
-  @override
-  Props get props => [id, name, email, isActive, role, createdAt, address];
-
   factory User.fromJson(Json json) => $.call(json);
-  User copyWith(FieldsBuilder<UserSchema> builder) => $.bind(this)(builder);
 }
 
 final class UserSchema extends Schema<User> {
-  late final id = field<int>('user_id');
-  late final name = field<String>('full_name');
-  late final email = field<String>('email_address');
-  late final isActive = field<bool>('is_active');
-  late final role = field('user_role', parser: enumOrFirst(UserRole.values));
-  late final createdAt = field<DateTime>('created_at');
-
-  // `nullable: true` is spelled out here even though it'd default to
-  // `null is R` (`Address?`) anyway — exercising the explicit override path
-  // alongside the implicit one used by the fields above.
-  late final address = field(
-    'user_address',
-    parser: modelOrNull(Address.fromJson),
-    nullable: true,
-  );
-
   @override
   ListFieldOf<User> get all => [
-    id,
-    name,
-    email,
-    isActive,
-    role,
-    createdAt,
-    address,
+    field<int>('user_id', getter: (m) => m.id),
+    field<String>('full_name', getter: (m) => m.name),
+    field<String>('email_address', getter: (m) => m.email),
+    field<bool>('is_active', getter: (m) => m.isActive),
+    field<UserRole>(
+      'user_role',
+      getter: (m) => m.role,
+      parser: enumOrFirst(UserRole.values),
+    ),
+    field<DateTime>('created_at', getter: (m) => m.createdAt),
+    field<Address?>(
+      'user_address',
+      getter: (m) => m.address,
+      parser: modelOrNull(Address.fromJson),
+      nullable: true,
+    ),
   ];
 }
 
@@ -169,62 +144,45 @@ class Terminal extends Equatable with Serializable<Terminal> {
     this.users,
   );
 
-  static final $ = ModelType<Terminal, TerminalSchema>(
-    Terminal.new,
-    TerminalSchema(),
-  );
+  static final $ = ModelType<Terminal>(Terminal.new, TerminalSchema());
 
   @override
   ListFieldOf<Terminal> get fields => $.schema.all;
-
-  @override
-  Props get props => [id, title, status, sensors, tokens, users];
-
   factory Terminal.fromJson(Json json) => $.call(json);
-
-  Terminal copyWith(FieldsBuilder<TerminalSchema> builder) =>
-      $.bind(this)(builder);
 }
 
 final class TerminalSchema extends Schema<Terminal> {
-  late final id = field<int>('t_id');
-  late final title = field(
-    'display_name',
-    parser: (v) => v as String? ?? 'Unnamed Terminal',
-  );
-  late final status = field(
-    'device_status',
-    parser: enumOrFirst(DeviceStatus.values),
-    // A custom serializer here is what makes the "direct construction"
-    // regression test below meaningful: without one, a missing cached
-    // value used to come back as a quiet `null` (still wrong, but not a
-    // crash). With one, `serializer(null as DeviceStatus)` is exactly the
-    // unsound cast that used to throw — see that test for details.
-    serializer: enumToJson,
-  );
-  late final sensors = field(
-    'attached_sensors',
-    parser: listOf<Sensor>(modelOf(Sensor.fromJson)),
-  );
-  late final tokens = field(
-    'access_keys',
-    parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
-    // Without this, the default serializer keys the JSON map by
-    // `AccessLevel.write.toString()` ("AccessLevel.write") instead of
-    // `.name` ("write") — see extension.dart's note on Enum-keyed Maps.
-    // `enumOrFirst` then silently can't recognize that key on the way
-    // back in and falls back to `AccessLevel.read`, so every copyWith()
-    // on a Terminal would quietly drop/corrupt any token other than
-    // "read", with no error raised.
-    serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
-  );
-  late final users = field(
-    'terminal_users',
-    parser: listOf<User>(modelOf(User.fromJson)),
-  );
-
   @override
-  ListFieldOf<Terminal> get all => [id, title, status, sensors, tokens, users];
+  ListFieldOf<Terminal> get all => [
+    field<int>('t_id', getter: (m) => m.id),
+    field<String>(
+      'display_name',
+      getter: (m) => m.title,
+      parser: stringOrDefault('Unnamed Terminal'),
+    ),
+    field<DeviceStatus>(
+      'device_status',
+      getter: (m) => m.status,
+      parser: enumOrFirst(DeviceStatus.values),
+      serializer: enumToJson,
+    ),
+    field<List<Sensor>>(
+      'attached_sensors',
+      getter: (m) => m.sensors,
+      parser: listOf<Sensor>(modelOf(Sensor.fromJson)),
+    ),
+    field<Map<AccessLevel, String>>(
+      'access_keys',
+      getter: (m) => m.tokens,
+      parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
+      serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
+    ),
+    field<List<User>>(
+      'terminal_users',
+      getter: (m) => m.users,
+      parser: listOf<User>(modelOf(User.fromJson)),
+    ),
+  ];
 }
 
 void main() {
@@ -389,30 +347,9 @@ void main() {
       };
 
       final originalTerminal = Terminal.fromJson(Json.of(rawJson));
-      final updatedTerminal = originalTerminal.copyWith(
-        ($) => [
-          $.status.set(DeviceStatus.offline),
-          $.title.set('Updated Terminal'),
-        ],
-      );
 
       expect(originalTerminal.status, DeviceStatus.active);
       expect(originalTerminal.title, 'Original Terminal');
-
-      expect(updatedTerminal.status, DeviceStatus.offline);
-      expect(updatedTerminal.title, 'Updated Terminal');
-
-      expect(updatedTerminal.sensors.length, 1);
-      expect(updatedTerminal.users.length, 1);
-      expect(updatedTerminal.sensors[0].uid, 'SN-001');
-      expect(updatedTerminal.users[0].name, 'John Doe');
-
-      // Regression check: an untouched Enum-keyed Map field must survive
-      // copyWith()'s toJson() -> fromJson() round trip intact, including
-      // keys other than the enum's first value.
-      expect(updatedTerminal.tokens.length, 2);
-      expect(updatedTerminal.tokens[AccessLevel.read], 'read_key');
-      expect(updatedTerminal.tokens[AccessLevel.write], 'write_key');
     });
 
     test('Test edge cases and error handling', () {
@@ -466,51 +403,6 @@ void main() {
       expect(terminal.users[0].id, 3);
       expect(terminal.users[0].isActive, true);
     });
-
-    test('Test deeply nested copyWith operations', () {
-      final Map<String, dynamic> rawJson = {
-        't_id': 1,
-        'display_name': 'Test Terminal',
-        'device_status': 'active',
-        'attached_sensors': [
-          {
-            'sensor_uid': 'SN-001',
-            'last_value': 10.5,
-            'history_logs': ['2026-01-07T10:00:00Z'],
-          },
-        ],
-        'access_keys': {'read': 'read_key'},
-        'terminal_users': [
-          {
-            'user_id': 1,
-            'full_name': 'John Doe',
-            'email_address': 'john@example.com',
-            'is_active': true,
-            'user_role': 'admin',
-            'created_at': '2026-01-07T10:00:00Z',
-            'user_address': {
-              'street_address': '123 Main St',
-              'city_name': 'New York',
-              'country_name': 'USA',
-              'zip_code': 10001,
-            },
-          },
-        ],
-      };
-
-      final originalTerminal = Terminal.fromJson(Json.of(rawJson));
-
-      final updatedTerminal = originalTerminal.copyWith(
-        ($) => [$.id.set(2), $.status.set(DeviceStatus.maintenance)],
-      );
-
-      expect(updatedTerminal.id, 2);
-      expect(updatedTerminal.status, DeviceStatus.maintenance);
-      expect(updatedTerminal.sensors.length, 1);
-      expect(updatedTerminal.users.length, 1);
-      expect(updatedTerminal.users[0].name, 'John Doe');
-      expect(updatedTerminal.users[0].address!.city, 'New York');
-    });
   });
 
   group('Direct construction (no fromJson) — regression for the props fix', () {
@@ -557,21 +449,15 @@ void main() {
 
       // This is exactly the call that used to crash: copyWith() starts by
       // calling toJson() on `terminal`.
-      final updated = terminal.copyWith(($) => [$.title.set('Renamed')]);
 
-      expect(updated.title, 'Renamed');
-      expect(updated.id, 5);
-      expect(updated.status, DeviceStatus.active);
       expect(terminal.title, 'Direct Terminal'); // original is untouched
     });
 
     test('== reflects real values for directly-constructed instances', () {
       final a = buildDirectly(raw);
       final b = buildDirectly(raw);
-      final renamed = a.copyWith(($) => [$.title.set('Different')]);
 
       expect(a, b); // same inputs → equal, not just "both blank"
-      expect(a == renamed, false);
     });
   });
 }

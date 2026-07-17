@@ -48,7 +48,6 @@
 
 import '../extension.dart' show buildField;
 import 'field.dart';
-import 'field_probe.dart' show copyEnumDomain;
 import 'types.dart';
 
 extension FieldBuilderX<M, R> on Field<M, R> {
@@ -58,18 +57,14 @@ extension FieldBuilderX<M, R> on Field<M, R> {
   /// ```dart
   /// field<int>('t_id').get((m) => m.id)
   /// ```
-  Field<M, R> get(R Function(M) getter) {
-    final next = Field<M, R>(
-      jsonKey: jsonKey,
-      nesting: nesting,
-      parser: parser,
-      nullable: nullable,
-      getter: getter,
-      serializer: serializer,
-    );
-    copyEnumDomain(this, next);
-    return next;
-  }
+  Field<M, R> get(R Function(M) getter) => Field<M, R>(
+    jsonKey: jsonKey,
+    nesting: nesting,
+    parser: parser,
+    nullable: nullable,
+    getter: getter,
+    serializer: serializer,
+  );
 
   /// Returns a new [Field], identical to `this` except for [serializer] attached as
   /// its [Field.serializer].
@@ -80,58 +75,40 @@ extension FieldBuilderX<M, R> on Field<M, R> {
   ///     .parse(mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty))
   ///     .serialize((map) => {for (final e in map.entries) e.key.name: e.value})
   /// ```
-  Field<M, R> serialize(Serializer<R> serializer) {
-    final next = Field<M, R>(
-      jsonKey: jsonKey,
-      nesting: nesting,
-      parser: parser,
-      nullable: nullable,
-      getter: getter,
-      serializer: serializer,
-    );
-    copyEnumDomain(this, next);
-    return next;
-  }
+  Field<M, R> serialize(Serializer<R> serializer) => Field<M, R>(
+    jsonKey: jsonKey,
+    nesting: nesting,
+    parser: parser,
+    nullable: nullable,
+    getter: getter,
+    serializer: serializer,
+  );
 
   /// Returns a new [Field], identical to `this` except for its
   /// [Field.nullable] flag set to [nullable] (defaults to `true` — the common
   /// case of just marking a field optional) — overriding the `null is R`
   /// default.
-  Field<M, R> optional([bool nullable = true]) {
-    final next = Field<M, R>(
-      jsonKey: jsonKey,
-      nesting: nesting,
-      parser: parser,
-      nullable: nullable,
-      getter: getter,
-      serializer: serializer,
-    );
-    copyEnumDomain(this, next);
-    return next;
-  }
+  Field<M, R> optional([bool nullable = true]) => Field<M, R>(
+    jsonKey: jsonKey,
+    nesting: nesting,
+    parser: parser,
+    nullable: nullable,
+    getter: getter,
+    serializer: serializer,
+  );
 
   /// Returns a new [Field] using [parser] as its [Field.parser].
   ///
   /// Unlike [get]/[serialize]/[optional] above, this goes back through
-  /// [buildField] rather than constructing a [Field] directly — [parser] might
-  /// be an `at(...)` wrapper (whose nesting path needs re-extracting from
-  /// [parser] itself) or an `enumOr*` combinator (whose value domain needs
-  /// re-attaching, fresh, for `Schema.set`'s same-typed-enum-field
-  /// disambiguation — see `ModelBinder._resolveSelector` in
-  /// model_type.dart). [buildField] already does both of those; this
-  /// method just hands it [parser] plus everything else already set on `this`:
+  /// [buildField] rather than constructing a [Field] directly — [parser]
+  /// might be an `at(...)` wrapper, whose nesting path needs re-extracting
+  /// from [parser] itself. [buildField] already does that; this method
+  /// just hands it [parser] plus everything else already set on `this`:
   /// ```dart
   /// field<Grade>('primary_grade')
   ///     .get((m) => m.primaryGrade)
   ///     .parse(enumOrFirst(Grade.values))
   /// ```
-  ///
-  /// No [copyEnumDomain] call is needed here the way the other three
-  /// methods need it — [buildField]'s own `attachEnumDomain` step already
-  /// tags the new field correctly, fresh from [parser]. Copying `this`'s *old*
-  /// domain forward instead would in fact be wrong here whenever [parser] turns
-  /// out to be a different enum's combinator than whatever [parser]
-  /// previously held.
   Field<M, R> parse(R Function(Object?) parser) => buildField<M, R>(
     jsonKey: jsonKey,
     parser: parser,

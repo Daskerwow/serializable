@@ -51,7 +51,7 @@ class Sensor extends Equatable with Serializable<Sensor> {
   final Grade secondaryGrade;
   final List<DateTime> history;
 
-  static final $ = ModelType<Sensor, SensorSchema>(Sensor.new, SensorSchema());
+  static final $ = ModelType(Sensor.new, SensorSchema());
 
   @override
   ListFieldOf<Sensor> get fields => $.schema.all;
@@ -63,7 +63,6 @@ class Sensor extends Equatable with Serializable<Sensor> {
   // round-trip. See `Terminal` further down for the other style.
 
   factory Sensor.fromJson(Json json) => $.call(json);
-  Sensor copyWith(FieldsBuilder<SensorSchema> updates) => $.bind(this)(updates);
 }
 
 final class SensorSchema extends Schema<Sensor> {
@@ -76,14 +75,6 @@ final class SensorSchema extends Schema<Sensor> {
     'is_calibrated'.field((m) => m.isCalibrated),
     'is_faulty'.field((m) => m.isFaulty),
     'is_offline'.field((m) => m.isOffline),
-    // Enums always need an explicit parser — and note that it agrees with
-    // the getter's type (`Grade`) exactly. That agreement matters: a
-    // getter/parser mismatch on a field declared inline like this doesn't
-    // fail to compile — Dart's generic inference just joins the two
-    // disagreeing types upward (in the worst case, all the way to
-    // `Object?`, this list's own element type), silently hiding the
-    // mismatch until a `Function.apply` call fails at runtime with an
-    // opaque `TypeError`. See the README's "Gotchas" section.
     'primary_grade'.field(
       (m) => m.primaryGrade,
       parser: enumOrFirst(Grade.values),
@@ -109,26 +100,11 @@ class Terminal extends Equatable with Serializable<Terminal> {
   final List<Sensor> sensors;
   final Map<AccessLevel, String> tokens;
 
-  static final $ = ModelType<Terminal, TerminalSchema>(
-    Terminal.new,
-    TerminalSchema(),
-  );
+  static final $ = ModelType(Terminal.new, TerminalSchema());
 
   @override
   ListFieldOf<Terminal> get fields => $.schema.all;
-
-  // Terminal deliberately keeps the *explicit* `props` style instead of
-  // giving every field a `getter:` — both styles are equally correct;
-  // this one just costs a JSON round-trip on every `copyWith` instead of
-  // a direct constructor call. See `main()` for what that trade-off
-  // actually looks like in practice.
-  @override
-  Props get props => [id, title, status, sensors, tokens];
-
   factory Terminal.fromJson(Json json) => $.call(json);
-
-  Terminal copyWith(FieldsBuilder<TerminalSchema> updates) =>
-      $.bind(this)(updates);
 }
 
 final class TerminalSchema extends Schema<Terminal> {
@@ -166,10 +142,6 @@ void main() {
         'sensor_uid': 'SN-001',
         'temperature': 22.5,
         'humidity': 48.0,
-        // All four bools start out `false`, and both grades start out
-        // `'a'` — on purpose. See the `$.set(...)` calls below: this is
-        // the genuine data collision the disambiguation machinery has
-        // to see through.
         'is_active': false,
         'is_calibrated': false,
         'is_faulty': false,
@@ -198,72 +170,4 @@ void main() {
   print(
     'id: ${terminal.id}, title: ${terminal.title}, status: ${terminal.status}',
   );
-
-  // ── copyWith on Terminal: the JSON round-trip path ────────────────────
-  // TerminalSchema's fields don't declare `getter:`, so this copyWith goes
-  // through toJson() -> writeDeep() -> fromJson() — every parser reruns,
-  // even for `sensors` and `tokens`, which weren't touched at all.
-  final renamed = terminal.copyWith(
-    ($) => [
-      $.set((m) => m.title, 'ZONE_B'),
-      $.set((m) => m.status, DeviceStatus.maintenance),
-    ],
-  );
-  print(
-    'renamed: ${renamed.title} / ${renamed.status}, '
-    'id unchanged: ${renamed.id == terminal.id}',
-  );
-
-  // ── copyWith on Sensor: direct construction, AND the actual proof that
-  //    colliding bool/enum fields still resolve to the right one ────────
-  //
-  // `isActive`, `isCalibrated`, `isFaulty`, and `isOffline` are ALL
-  // `false` on this instance, and `primaryGrade`/`secondaryGrade` are
-  // BOTH `Grade.a` — genuine collisions across four bool fields and two
-  // fields of the same enum type. If `$.set((m) => m.field, value)`
-  // resolved to the wrong field here, one of the *other* three bools (or
-  // the *other* grade) would flip instead of the one actually named.
-  final firstSensor = terminal.sensors.first;
-  final flagged = firstSensor.copyWith(
-    ($) => [
-      $.set((m) => m.isFaulty, true),
-      $.set((m) => m.secondaryGrade, Grade.c),
-    ],
-  );
-
-  print(
-    'only isFaulty flipped -> isActive=${flagged.isActive} '
-    'isCalibrated=${flagged.isCalibrated} isFaulty=${flagged.isFaulty} '
-    'isOffline=${flagged.isOffline}',
-  );
-  print(
-    'only secondaryGrade changed -> primaryGrade=${flagged.primaryGrade} '
-    'secondaryGrade=${flagged.secondaryGrade}',
-  );
-  // isActive / isCalibrated / isOffline must still print `false`, and
-  // primaryGrade must still print `Grade.a` — that's the proof.
-
-  // ── The resolved-field form needs none of the above disambiguation —
-  //    `$.field.set(value)` already *is* the target `Field` ─────────────
-  final calibrated = firstSensor.copyWith(
-    ($) => [$.set((m) => m.isCalibrated, true)],
-  );
-  print(
-    'calibrated=${calibrated.isCalibrated}, '
-    'isFaulty unchanged=${calibrated.isFaulty == firstSensor.isFaulty}',
-  );
-
-  print(terminal.toJson());
-  print(flagged.toJson());
-
-  // ── toJson()/== are built from `props`, so they're correct even for an
-  //    instance built by calling the constructor directly — no fromJson
-  //    involved at all — as long as `props` lists the same fields, in the
-  //    same order, as `fields` (and the constructor) ────────────────────
-  final direct = Terminal(1, 'Direct', DeviceStatus.active, const [], const {});
-  final directRenamed = direct.copyWith(
-    ($) => [$.set((m) => m.title, 'Direct Updated')],
-  );
-  print('direct-construction toJson: ${direct.toJson()}');
-  print('direct-construction copyWith: ${directRenamed.toJson()}');
 }

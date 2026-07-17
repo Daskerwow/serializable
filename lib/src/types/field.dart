@@ -27,7 +27,6 @@
 // as `Field<M, Object?>`.
 // =============================================================================
 
-import 'field_patch.dart';
 import 'types.dart';
 
 /// Descriptor that binds a single JSON key to a typed Dart property.
@@ -143,25 +142,4 @@ final class Field<M, R> {
   /// identical type, swapped, still passes — only an actual getter, or
   /// the model's own correctness, can catch that).
   bool acceptsValue(Object? value) => value is R;
-}
-
-// =============================================================================
-// FieldPatchX — Field extension for creating a patch
-// =============================================================================
-
-extension FieldPatchX<M, R> on Field<M, R> {
-  /// Creates a [FieldPatch] for this field with the given value.
-  ///
-  /// Usage:
-  /// ```dart
-  /// model.copyWith(($) => [
-  ///   $.price.set(9.99),
-  ///   $.title.set('New title'),
-  /// ]);
-  /// ```
-  ///
-  /// The patch carries `this` — the exact [Field] object — not a copy of
-  /// its `jsonKey`/`nesting`. [ModelBinder] matches patches back to fields
-  /// by identity of this very object, not by re-deriving a string path.
-  FieldPatch set(R value) => FieldPatch(this, value);
 }
