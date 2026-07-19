@@ -110,10 +110,10 @@ final class Field<M, R> {
   /// instance — e.g. `getter: (m) => m.uid`.
   ///
   /// Entirely optional: a model can keep declaring `props` by hand (the
-  /// original approach) and never set this. But when *every* field in a
-  /// [Schema] has a getter, [Serializable]'s default `props` implementation
-  /// can build the whole `props` list from [fields] alone — one less
-  /// hand-maintained list that has to stay in sync with the constructor.
+  /// original approach) and never set this. But when *every* field has a
+  /// getter, [PropsFromGetters]'s default `props` implementation can build
+  /// the whole `props` list from `fields` alone — one less hand-maintained
+  /// list that has to stay in sync with the constructor.
   ///
   /// Unlike [serializer], this needs no type-erased wrapper: [R] only
   /// appears in *return* position here, so `R Function(M)` is already a
@@ -144,9 +144,9 @@ final class Field<M, R> {
   /// );
   /// ```
   /// (`field<R>(jsonKey)` here is the model-agnostic top-level convenience
-  /// in extension.dart — a `Schema`-declared or `'key'.field<M, R>()`
-  /// field works identically, just with a concrete `M` instead of
-  /// `Object?`.)
+  /// in extension.dart — a [RecordedFields]-derived field or a
+  /// `'key'.field<M, R>()`-declared one works identically, just with a
+  /// concrete `M` instead of `Object?`.)
   /// No `Function.apply`, no intermediate `List<Object?>` holding every
   /// field's value, and — since this is now a literal constructor call
   /// instead of a dynamic one — a field whose type doesn't match the

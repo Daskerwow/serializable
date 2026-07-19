@@ -9,23 +9,27 @@ enum AccessLevel { read, write, execute }
 enum Grade { a, b, c }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Sensor — single class, RecordedFields, hand-written props
+// Sensor / SensorData — data class + RecordedFields subclass.
+//
+// Note the public constructor on `Sensor` itself — RecordedFields no
+// longer needs a private one. `fields` is derived once, per *type*, from
+// the field(...) calls inside `Sensor.fromJson`; every `Sensor` instance
+// shares that same list, regardless of how it was built.
 // ══════════════════════════════════════════════════════════════════════════════
 
-class Sensor extends Equatable
-    with Serializable<Sensor>, RecordedFields<Sensor> {
-  Sensor._(
-    this.uid,
-    this.temperature,
-    this.humidity,
-    this.isActive,
-    this.isCalibrated,
-    this.isFaulty,
-    this.isOffline,
-    this.primaryGrade,
-    this.secondaryGrade,
-    this.history,
-  );
+class SensorData extends Equatable {
+  SensorData({
+    required this.uid,
+    required this.temperature,
+    required this.humidity,
+    required this.isActive,
+    required this.isCalibrated,
+    required this.isFaulty,
+    required this.isOffline,
+    required this.primaryGrade,
+    required this.secondaryGrade,
+    required this.history,
+  });
 
   final String uid;
   final double temperature;
@@ -51,25 +55,43 @@ class Sensor extends Equatable
     secondaryGrade,
     history,
   ];
+}
+
+class Sensor extends SensorData
+    with Serializable<Sensor>, RecordedFields<Sensor> {
+  // Public — a plain, ordinary constructor. Nothing about RecordedFields
+  // requires this to be private any more.
+  Sensor({
+    required super.uid,
+    required super.temperature,
+    required super.humidity,
+    required super.isActive,
+    required super.isCalibrated,
+    required super.isFaulty,
+    required super.isOffline,
+    required super.primaryGrade,
+    required super.secondaryGrade,
+    required super.history,
+  });
 
   factory Sensor.fromJson(Json json) => recordFields(
-    () => Sensor._(
-      field<String>('sensor_uid').readFrom(json),
-      field<double>('temperature').readFrom(json),
-      field<double>('humidity').readFrom(json),
-      field<bool>('is_active').readFrom(json),
-      field<bool>('is_calibrated').readFrom(json),
-      field<bool>('is_faulty').readFrom(json),
-      field<bool>('is_offline').readFrom(json),
-      field<Grade>(
+    () => Sensor(
+      uid: field<String>('sensor_uid').readFrom(json),
+      temperature: field<double>('temperature').readFrom(json),
+      humidity: field<double>('humidity').readFrom(json),
+      isActive: field<bool>('is_active').readFrom(json),
+      isCalibrated: field<bool>('is_calibrated').readFrom(json),
+      isFaulty: field<bool>('is_faulty').readFrom(json),
+      isOffline: field<bool>('is_offline').readFrom(json),
+      primaryGrade: field<Grade>(
         'primary_grade',
         parser: enumOrFirst(Grade.values),
       ).readFrom(json),
-      field<Grade>(
+      secondaryGrade: field<Grade>(
         'secondary_grade',
         parser: enumOrFirst(Grade.values),
       ).readFrom(json),
-      field<List<DateTime>>(
+      history: field<List<DateTime>>(
         'history_logs',
         parser: listOf(dateTimeOrEpoch),
       ).readFrom(json),
@@ -78,7 +100,11 @@ class Sensor extends Equatable
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Terminal — nested Sensor list + an Enum-keyed Map serializer
+// Terminal / TerminalData — nested Sensor list + an Enum-keyed Map serializer.
+//
+// Exactly the shape requested: a plain TerminalData data class, and a
+// Terminal subclass with a normal public constructor *and* a fromJson
+// factory, both fully supported side by side. toJson() is automatic.
 // ══════════════════════════════════════════════════════════════════════════════
 
 class TerminalData extends Equatable {
@@ -125,17 +151,25 @@ class Terminal extends TerminalData
         'attached_sensors',
         parser: listOf(modelOf(Sensor.fromJson)),
       ).readFrom(json),
+      // The default serializer keys a Map by `.toString()` — an Enum's
+      // includes its type name (`"AccessLevel.write"`, not `"write"`), so
+      // this one needs its own `.name`-based serializer.
       tokens: field<Map<AccessLevel, String>>(
         'access_keys',
         parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
-        serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
+        serializer: (map) => {
+          for (final e in map.entries) e.key.name: e.value,
+        },
       ).readFrom(json),
     ),
   );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// User / UserModel — domain object + a thin JSON-capable subclass
+// User / UserModel — alternative style: PropsFromGetters + hand-declared
+// fields (no RecordedFields here), still with a public constructor. This
+// was always supported; shown for contrast with the Terminal/Sensor style
+// above.
 // ══════════════════════════════════════════════════════════════════════════════
 
 class User extends Equatable {
@@ -150,15 +184,26 @@ class User extends Equatable {
 }
 
 class UserModel extends User
-    with Serializable<UserModel>, RecordedFields<UserModel> {
-  UserModel._({required super.id, required super.name, super.email});
+    with Serializable<UserModel>, PropsFromGetters<UserModel> {
+  UserModel({required super.id, required super.name, super.email});
 
-  factory UserModel.fromJson(Json json) => recordFields(
-    () => UserModel._(
-      id: field<int>('user_id').readFrom(json),
-      name: field<String>('full_name').readFrom(json),
-      email: field<String?>('email_address').readFrom(json),
-    ),
+  static final _idField = 'user_id'.field<UserModel, int>(
+    getter: (m) => m.id,
+  );
+  static final _nameField = 'full_name'.field<UserModel, String>(
+    getter: (m) => m.name,
+  );
+  static final _emailField = 'email_address'.field<UserModel, String?>(
+    getter: (m) => m.email,
+  );
+
+  @override
+  ListFieldOf get fields => [_idField, _nameField, _emailField];
+
+  factory UserModel.fromJson(Json json) => UserModel(
+    id: _idField.readFrom(json),
+    name: _nameField.readFrom(json),
+    email: _emailField.readFrom(json),
   );
 }
 
@@ -200,6 +245,8 @@ void main() {
     'access_keys': {'read': 'key_r', 'write': 'key_w'},
   };
 
+  // ─── via fromJson — this is also what populates Terminal's (and
+  // Sensor's) cached `fields`, the first time it runs. ────────────────────
   final terminal = Terminal.fromJson(raw);
   print(
     'id: ${terminal.id}, title: ${terminal.title}, status: ${terminal.status}',
@@ -207,10 +254,28 @@ void main() {
   print('terminal.toJson(): ${terminal.toJson()}');
   print('round-trips: ${terminal == Terminal.fromJson(terminal.toJson())}');
 
+  // ─── via a perfectly ordinary public constructor — the actual fix. ─────
+  // No JSON in sight, no recordFields(...), no private constructor to
+  // dodge. This used to throw StateError the moment `.toJson()` (or even
+  // `.fields`) was touched; now it just works, because `fields` was
+  // already cached for `Terminal` above.
+  final manualTerminal = Terminal(
+    id: 42,
+    title: 'MANUAL',
+    status: DeviceStatus.maintenance,
+    sensors: const [],
+    tokens: const {AccessLevel.read: 'manual_key'},
+  );
+  print('manualTerminal.toJson(): ${manualTerminal.toJson()}');
+
   final user = UserModel.fromJson({
     'user_id': 7,
     'full_name': 'Ada',
     'email_address': null,
   });
   print('user.toJson(): ${user.toJson()}');
+
+  // Same story for UserModel — plain construction, no fromJson involved:
+  final manualUser = UserModel(id: 8, name: 'Grace');
+  print('manualUser.toJson(): ${manualUser.toJson()}');
 }

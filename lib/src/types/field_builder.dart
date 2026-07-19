@@ -2,8 +2,8 @@
 // field_builder.dart
 //
 // Fluent alternative to passing parser/serializer/nullable/getter as named
-// arguments to `field<R>(jsonKey, ...)` (Schema.field, model_type.dart) or
-// `'jsonKey'.field<M, R>(...)` (FieldStringX, extension.dart) all at once —
+// arguments to `'jsonKey'.field<M, R>(...)` (FieldStringX, extension.dart)
+// or the bare `field<R>(jsonKey, ...)` (also extension.dart) all at once —
 // attach them one at a time instead:
 //
 //   field<int>('t_id').get((m) => m.id)
@@ -14,11 +14,9 @@
 //       .serialize(enumToJson)
 //
 // `M` is whatever it already was on the `Field<M, R>` this chain starts
-// from — inside a `Schema<M>`, that's already fixed by the class itself
-// (see `Schema.field` in model_type.dart), so every step here only ever
-// needs `<R>`, never `<M, R>`. Nothing new is inferred at any point in the
-// chain: each method below is called on an already-fully-typed `Field<M,
-// R>` and returns another one.
+// from, so every step here only ever needs `<R>`, never `<M, R>`. Nothing
+// new is inferred at any point in the chain: each method below is called
+// on an already-fully-typed `Field<M, R>` and returns another one.
 //
 // Note this chain's `.get(getter)` takes the getter *positionally* —
 // unlike `FieldStringX.field`'s `getter:` (a named parameter, forced by

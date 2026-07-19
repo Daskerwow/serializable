@@ -17,8 +17,11 @@
 // (key, parser, serializer). A model's current values come from its own
 // `props` (the standard Equatable list — see `Serializable` in
 // serializable_model.dart), not from a closure on `Field` itself. Prefer
-// `Schema.field` over this top-level extension when a model already
-// declares a schema — see model_type.dart.
+// declaring fields inline inside `Model.fromJson` (via the bare top-level
+// `field<R>(jsonKey)`, together with the `RecordedFields` mixin — see
+// serializable_model.dart) when a model doesn't need `props` derived from
+// getters; use this extension directly when you want an explicit `M` and/or
+// a `getter:` for `PropsFromGetters`.
 //
 // ─── Fixed Issues ────────────────────────────────────────────────────
 //
@@ -43,7 +46,7 @@
 //      *optional* positional parameter to sit alongside named ones in the
 //      same signature, so "optional and positional" was never reachable
 //      here to begin with — `getter` is now `getter: (m) => m.x`, an
-//      optional named parameter, matching `Schema.field` in model_type.dart.
+//      optional named parameter.
 // =============================================================================
 
 import 'errors.dart';
@@ -51,11 +54,7 @@ import 'types/field.dart';
 import 'types/parser.dart';
 
 /// Extension on [String] for declarative, top-level definition of a model
-/// field. Prefer [Schema.field] when the model already declares a schema —
-/// it reads more naturally (`field<R>(jsonKey, ...)`, with `M` already
-/// known from the schema's own type parameter) and is what every model in
-/// the README actually uses. This extension is for the rare field declared
-/// outside any [Schema].
+/// field, with an explicit or inferred `M`.
 ///
 /// ### Type parameters
 ///
@@ -87,11 +86,12 @@ import 'types/parser.dart';
 /// **[getter]** — optional named argument (`.field(getter: (m) => m.x)`).
 /// `Field` still only *describes* the JSON side (key, parser, serializer)
 /// and carries no per-instance state of its own — but attaching a getter
-/// lets [Serializable]'s default `props` implementation read this field's
-/// current value straight off a model instance, so the model doesn't have
-/// to declare `props` by hand. Omit it (as in every example above) and
-/// declare `props` yourself, exactly as you would for plain `Equatable`.
-/// See [Serializable] in serializable_model.dart for both styles.
+/// lets [PropsFromGetters]'s default `props` implementation read this
+/// field's current value straight off a model instance, so the model
+/// doesn't have to declare `props` by hand. Omit it (as in every example
+/// above) and declare `props` yourself, exactly as you would for plain
+/// `Equatable`. See [Serializable] in serializable_model.dart for both
+/// styles.
 extension FieldStringX on String {
   Field<M, R> field<M, R>({
     R Function(M)? getter,
@@ -108,21 +108,22 @@ extension FieldStringX on String {
 }
 
 /// A bare, model-agnostic way to declare a field — `field<R>(jsonKey)`,
-/// with no `M` to supply at all (unlike [FieldStringX.field] /
-/// [Schema.field], both of which need or infer a concrete model type).
+/// with no `M` to supply at all (unlike [FieldStringX.field], which needs
+/// or infers a concrete model type).
 ///
 /// Every call is also registered into the current [recordFields] frame,
 /// if one is active — this is what lets [RecordedFields] build a model's
 /// `fields` from nothing but the `field(...)` calls its own `fromJson`
 /// already makes, with no separate `fields` list to keep in sync:
 /// ```dart
-/// factory UserModel.fromJson(Json json) => recordFields(() => UserModel._(
+/// factory UserModel.fromJson(Json json) => recordFields(() => UserModel(
 ///   id: field<int>('user_id').readFrom(json),
 ///   name: field<String>('full_name').readFrom(json),
 /// ));
 /// ```
 /// See [RecordedFields]'s doc comment (serializable_model.dart) for the
-/// full pattern, including why the real constructor above is private.
+/// full pattern, including how the field list it derives is shared by
+/// every instance of the model — not just ones built through `fromJson`.
 ///
 /// Returns `Field<Object?, R>` — the same [Field], with the same
 /// [Field.readFrom]/[Field.parser]/[Field.nullable] behavior as any other,
@@ -132,10 +133,10 @@ extension FieldStringX on String {
 /// this way reports `modelType: Object?` rather than the model's real
 /// name, since there's no model type in scope here for it to report. If
 /// you want the real model name in error output — or a `getter:`, for
-/// [PropsFromGetters] — declare the field through [Schema.field] or
-/// [FieldStringX.field] (`'jsonKey'.field<M, R>(...)`) instead, both of
-/// which take an explicit or inferred `M` (and are registered into
-/// [recordFields] exactly the same way, if you want to mix styles).
+/// [PropsFromGetters] — declare the field through [FieldStringX.field]
+/// instead (`'jsonKey'.field<M, R>(...)`), which takes an explicit or
+/// inferred `M` (and is registered into [recordFields] exactly the same
+/// way, if you want to mix styles).
 ///
 /// Not using [RecordedFields]? `Field<Object?, R>` doesn't require every
 /// field in a `ListFieldOf` to share one exact model type (see that

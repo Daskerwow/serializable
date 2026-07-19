@@ -1,13 +1,18 @@
 // =============================================================================
 // json_path.dart
 //
-// One small piece of shared plumbing, used by both read directions:
+// One small piece of shared plumbing, used by the read direction:
 //   - Field.readFrom (field.dart) — one field at a time, no Function.apply.
 //   - SerializableHelpers.fromJson (serializable_model.dart) — the whole
-//     `fields` list at once, via Function.apply. As of this file's
-//     introduction, fromJson is implemented *in terms of* Field.readFrom
-//     (one call per field) rather than duplicating this walk itself — see
-//     serializable_model.dart's header.
+//     `fields` list at once, via Function.apply. fromJson is implemented
+//     *in terms of* Field.readFrom (one call per field) rather than
+//     duplicating this walk itself — see serializable_model.dart's header.
+//
+// Still required: this is what makes `at('meta', ...)` nested field access
+// work at all. Every `Field.nesting` path — populated by `at()` in
+// nested_access.dart — is walked here before the value ever reaches a
+// field's own parser. Without this file, `at(...)` would have nothing to
+// resolve against and nested JSON reads would break.
 //
 // Lives in its own file, at the same level as types.dart, specifically so
 // `field.dart` can use it without importing `serializable_model.dart` (that

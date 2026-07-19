@@ -47,12 +47,13 @@ typedef FieldOf<M> = Field<M, Object?>;
 /// `Serializable.toJson()` — needs every element to share one exact `M`.
 /// Each [Field] already carries (and enforces) its own `M` internally,
 /// for its own `getter`'s parameter type and for the `modelType` on any
-/// error it throws; a field built via `Schema<M>.field` or
-/// `'key'.field<M, R>()` keeps that `M` even once it's sitting in a
-/// `ListFieldOf`, exactly as before. What's no longer required is for
-/// *every* field in the list to share the *same* `M` — which is what let
-/// the top-level `field<R>(jsonKey)` convenience (`extension.dart`,
-/// `Field<Object?, R>`) sit in the same list as `Schema`-declared fields.
+/// error it throws; a field built via `'key'.field<M, R>()`
+/// (`FieldStringX`, see extension.dart) keeps that `M` even once it's
+/// sitting in a `ListFieldOf`, exactly as before. What's no longer
+/// required is for *every* field in the list to share the *same* `M` —
+/// which is what lets the model-agnostic top-level `field<R>(jsonKey)`
+/// convenience (`extension.dart`, `Field<Object?, R>`) sit in the same
+/// list as `FieldStringX`-declared fields.
 typedef ListFieldOf = List<Field<Object?, Object?>>;
 
 /// Field values for [Equatable.props].
