@@ -22,64 +22,59 @@ enum AccessLevel { read, write, execute }
 enum UserRole { admin, user, guest }
 
 /// Nested model: Sensor
-class Sensor extends Equatable with Serializable<Sensor> {
+class SensorData extends Equatable {
   final String uid;
   final double value;
   final List<DateTime> history;
 
-  const Sensor(this.uid, this.value, this.history);
-
-  static final $ = ModelType(Sensor.new, SensorSchema());
+  const SensorData(this.uid, this.value, this.history);
 
   @override
-  ListFieldOf<Sensor> get fields => $.schema.all;
-  factory Sensor.fromJson(Json json) => $.call(json);
+  List<Object?> get props => [uid, value, history];
 }
 
-/// Schema
-final class SensorSchema extends Schema<Sensor> {
-  late final uid = field<String>('sensor_uid', getter: (m) => m.uid);
-  late final value = field<double>('last_value', getter: (m) => m.value);
-  late final history = field(
-    'history_logs',
-    getter: (m) => m.history,
-    parser: listOf<DateTime>(dateTimeOrEpoch),
-  );
+class Sensor extends SensorData
+    with Serializable<Terminal>, RecordedFields<Terminal> {
+  const Sensor(super.uid, super.value, super.history);
 
-  @override
-  ListFieldOf<Sensor> get all => [uid, value, history];
+  factory Sensor.fromJson(Json json) => recordFields(
+    () => Sensor(
+      field<String>('sensor_uid').readFrom(json),
+      field<double>('last_value').readFrom(json),
+      field<List<DateTime>>(
+        'history_logs',
+        parser: listOf<DateTime>(dateTimeOrEpoch),
+      ).readFrom(json),
+    ),
+  );
 }
 
 /// Nested model: Address
-class Address extends Equatable with Serializable<Address> {
+class AddressData extends Equatable {
   final String street;
   final String city;
   final String country;
   final int zipCode;
 
-  const Address(this.street, this.city, this.country, this.zipCode);
-
-  static final $ = ModelType<Address>(Address.new, AddressSchema());
+  const AddressData(this.street, this.city, this.country, this.zipCode);
 
   @override
-  ListFieldOf<Address> get fields => $.schema.all;
-  factory Address.fromJson(Json json) => $.call(json);
+  List<Object?> get props => [street, city, country, zipCode];
 }
 
-final class AddressSchema extends Schema<Address> {
-  /// Declaration order does not matter here.
-  late final street = field<String>('street_address', getter: (m) => m.street);
-  late final city = field<String>('city_name', getter: (m) => m.city);
-  late final country = field<String>('country_name', getter: (m) => m.country);
-  late final zipCode = field<int>('zip_code', getter: (m) => m.zipCode);
+class Address extends AddressData
+    with Serializable<Address>, RecordedFields<Address> {
+  const Address(super.street, super.city, super.country, super.zipCode);
 
-  /// The order here is exactly the same as in
-  /// `Address(this.street, this.city, this.country, this.zipCode)`.
-  @override
-  ListFieldOf<Address> get all => [street, city, country, zipCode];
+  factory Address.fromJson(Json json) => Address(
+    field<String>('street_address').readFrom(json),
+    field<String>('city_name').readFrom(json),
+    field<String>('country_name').readFrom(json),
+    field<int>('zip_code').readFrom(json),
+  );
 }
 
-class User extends Equatable with Serializable<User> {
+class UserData extends Equatable {
   final int id;
   final String name;
   final String email;
@@ -88,7 +83,7 @@ class User extends Equatable with Serializable<User> {
   final DateTime createdAt;
   final Address? address;
 
-  const User(
+  const UserData(
     this.id,
     this.name,
     this.email,
@@ -98,36 +93,50 @@ class User extends Equatable with Serializable<User> {
     this.address,
   );
 
-  static final $ = ModelType<User>(User.new, UserSchema());
-
   @override
-  ListFieldOf<User> get fields => $.schema.all;
-  factory User.fromJson(Json json) => $.call(json);
-}
-
-final class UserSchema extends Schema<User> {
-  @override
-  ListFieldOf<User> get all => [
-    field<int>('user_id', getter: (m) => m.id),
-    field<String>('full_name', getter: (m) => m.name),
-    field<String>('email_address', getter: (m) => m.email),
-    field<bool>('is_active', getter: (m) => m.isActive),
-    field<UserRole>(
-      'user_role',
-      getter: (m) => m.role,
-      parser: enumOrFirst(UserRole.values),
-    ),
-    field<DateTime>('created_at', getter: (m) => m.createdAt),
-    field<Address?>(
-      'user_address',
-      getter: (m) => m.address,
-      parser: modelOrNull(Address.fromJson),
-      nullable: true,
-    ),
+  List<Object?> get props => [
+    id,
+    name,
+    email,
+    isActive,
+    role,
+    createdAt,
+    address,
   ];
 }
 
-class Terminal extends Equatable with Serializable<Terminal> {
+class User extends UserData with Serializable<User>, RecordedFields<User> {
+  const User(
+    super.id,
+    super.name,
+    super.email,
+    super.isActive,
+    super.role,
+    super.createdAt,
+    super.address,
+  );
+
+  factory User.fromJson(Json json) => recordFields(
+    () => User(
+      field<int>('user_id').readFrom(json),
+      field<String>('full_name').readFrom(json),
+      field<String>('email_address').readFrom(json),
+      field<bool>('is_active').readFrom(json),
+      field<UserRole>(
+        'user_role',
+        parser: enumOrFirst(UserRole.values),
+      ).readFrom(json),
+      field<DateTime>('created_at').readFrom(json),
+      field<Address?>(
+        'user_address',
+        parser: modelOrNull(Address.fromJson),
+        nullable: true,
+      ).readFrom(json),
+    ),
+  );
+}
+
+class TerminalData extends Equatable {
   final int id;
   final String title;
   final DeviceStatus status;
@@ -135,7 +144,7 @@ class Terminal extends Equatable with Serializable<Terminal> {
   final Map<AccessLevel, String> tokens;
   final List<User> users;
 
-  const Terminal(
+  const TerminalData(
     this.id,
     this.title,
     this.status,
@@ -144,45 +153,48 @@ class Terminal extends Equatable with Serializable<Terminal> {
     this.users,
   );
 
-  static final $ = ModelType<Terminal>(Terminal.new, TerminalSchema());
-
   @override
-  ListFieldOf<Terminal> get fields => $.schema.all;
-  factory Terminal.fromJson(Json json) => $.call(json);
+  List<Object?> get props => [id, title, status, sensors, tokens, users];
 }
 
-final class TerminalSchema extends Schema<Terminal> {
-  @override
-  ListFieldOf<Terminal> get all => [
-    field<int>('t_id', getter: (m) => m.id),
-    field<String>(
-      'display_name',
-      getter: (m) => m.title,
-      parser: stringOrDefault('Unnamed Terminal'),
+class Terminal extends TerminalData
+    with Serializable<Terminal>, RecordedFields<Terminal> {
+  const Terminal(
+    super.id,
+    super.title,
+    super.status,
+    super.sensors,
+    super.tokens,
+    super.users,
+  );
+
+  factory Terminal.fromJson(Json json) => recordFields(
+    () => Terminal(
+      field<int>('t_id').readFrom(json),
+      field<String>(
+        'display_name',
+        parser: stringOrDefault('Unnamed Terminal'),
+      ).readFrom(json),
+      field<DeviceStatus>(
+        'device_status',
+        parser: enumOrFirst(DeviceStatus.values),
+        serializer: enumToJson,
+      ).readFrom(json),
+      field<List<Sensor>>(
+        'attached_sensors',
+        parser: listOf<Sensor>(modelOf(Sensor.fromJson)),
+      ).readFrom(json),
+      field<Map<AccessLevel, String>>(
+        'access_keys',
+        parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
+        serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
+      ).readFrom(json),
+      field<List<User>>(
+        'terminal_users',
+        parser: listOf<User>(modelOf(User.fromJson)),
+      ).readFrom(json),
     ),
-    field<DeviceStatus>(
-      'device_status',
-      getter: (m) => m.status,
-      parser: enumOrFirst(DeviceStatus.values),
-      serializer: enumToJson,
-    ),
-    field<List<Sensor>>(
-      'attached_sensors',
-      getter: (m) => m.sensors,
-      parser: listOf<Sensor>(modelOf(Sensor.fromJson)),
-    ),
-    field<Map<AccessLevel, String>>(
-      'access_keys',
-      getter: (m) => m.tokens,
-      parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
-      serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
-    ),
-    field<List<User>>(
-      'terminal_users',
-      getter: (m) => m.users,
-      parser: listOf<User>(modelOf(User.fromJson)),
-    ),
-  ];
+  );
 }
 
 void main() {
