@@ -25,8 +25,25 @@
 // The wrapper accepts `Object?` and is safe at any level of erasure.
 // Use [hasSerializer] + [serializeErased] wherever the field is stored
 // as `Field<M, Object?>`.
+//
+// ─── Two ways to turn a `Field` list back into a model ───────────────────────
+//
+// [readErased] (below) reads a field's *current* value off a live model
+// instance — the write direction, used to build `props`/`toJson()`.
+// [readFrom] is the read direction's counterpart: it pulls this field's
+// value *out of* raw JSON. [SerializableHelpers.fromJson] calls it once per
+// field and threads the results through `Function.apply` — the
+// zero-extra-code path every example in the README starts with. Calling
+// [readFrom] directly, once per field, as a literal positional argument to
+// the model's own constructor, skips `Function.apply` entirely and gets the
+// same values with a statically-typed, directly-inlinable call instead of a
+// dynamic one — see the README's "Fast, Function.apply-free
+// deserialization" section for the full pattern (and how it composes with
+// Dart's primary constructors).
 // =============================================================================
 
+import '../errors.dart';
+import 'json_path.dart';
 import 'types.dart';
 
 /// Descriptor that binds a single JSON key to a typed Dart property.
@@ -111,6 +128,77 @@ final class Field<M, R> {
   ///
   /// Call only after checking [hasGetter].
   Object? readErased(M instance) => getter!(instance);
+
+  /// Reads, parses, and null-checks this field's value directly out of
+  /// [json] — the same work [SerializableHelpers.fromJson] does per field
+  /// before handing everything to `Function.apply`, but for exactly this
+  /// one field, statically typed as [R], and callable on its own.
+  ///
+  /// Meant to be called once per field, directly as a positional argument
+  /// to a hand-written factory constructor:
+  /// ```dart
+  /// factory UserModel.fromJson(Json json) => UserModel(
+  ///   id: field<int>('user_id').readFrom(json),
+  ///   name: field<String>('full_name').readFrom(json),
+  ///   email: field<String?>('email_address').readFrom(json),
+  /// );
+  /// ```
+  /// (`field<R>(jsonKey)` here is the model-agnostic top-level convenience
+  /// in extension.dart — a `Schema`-declared or `'key'.field<M, R>()`
+  /// field works identically, just with a concrete `M` instead of
+  /// `Object?`.)
+  /// No `Function.apply`, no intermediate `List<Object?>` holding every
+  /// field's value, and — since this is now a literal constructor call
+  /// instead of a dynamic one — a field whose type doesn't match the
+  /// constructor parameter it feeds is a **compile-time** error instead of
+  /// the runtime `StateError` `Function.apply` needed to catch the same
+  /// mistake.
+  ///
+  /// Throws [RequiredFieldError] if the parsed value is `null` and
+  /// [nullable] is `false`. [TypeConversionError] typically surfaces from
+  /// within [parser] itself (see `buildField` in extension.dart); any other
+  /// exception [parser] throws is wrapped in a [SerializationError] with
+  /// this field's [modelType]/[jsonKey]/[path]/raw value attached, same as
+  /// `fromJson` already did.
+  R readFrom(Json json) {
+    final raw = readJsonPath(json, nesting, jsonKey);
+    final Object? value;
+    try {
+      value = parser(raw);
+    } on SerializationError {
+      // Typed errors already carry full context — propagate unwrapped.
+      rethrow;
+    } catch (e, st) {
+      Error.throwWithStackTrace(
+        SerializationError(
+          modelType: M,
+          jsonKey: jsonKey,
+          path: path,
+          rawValue: raw,
+          cause: e,
+        ),
+        st,
+      );
+    }
+
+    if (value == null) {
+      // A nullable field legitimately resolves to null — safe to hand back
+      // as R: `nullable` is only ever true when `null is R` (see
+      // `buildField`'s `resolvedNullable`), so this cast can't fail for a
+      // correctly-built Field.
+      if (nullable) return null as R;
+      throw RequiredFieldError(
+        modelType: M,
+        jsonKey: jsonKey,
+        path: path,
+        rawValue: raw,
+      );
+    }
+
+    // `parser` already validated `value is R` (see `buildField`) —
+    // `TypeConversionError` would already have been thrown above otherwise.
+    return value as R;
+  }
 
   // Type-erased wrapper created once in the constructor.
   // Accepts Object? and casts to R via `as R` inside.

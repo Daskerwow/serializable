@@ -14,7 +14,7 @@ Parser<T> modelOf<T>(T Function(Json) fromJson) =>
     (Object? v) => switch (v) {
       // A typed *view* via Map.cast, not a copy via Map.from — the map is
       // only ever read from fromJson, matching the same reasoning as
-      // SerializableHelpers._readPath (see serializable_model.dart).
+      // readJsonPath (see types/json_path.dart).
       final Map m => fromJson(m.cast<String, Object?>()),
       _ => throw FormatException(
         'modelOf<$T>: expected a Map, got ${v?.runtimeType}',

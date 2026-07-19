@@ -34,11 +34,26 @@ typedef Serializer<T> = Object? Function(T value);
 /// at compile time (e.g., `List<FieldOf<User>>`).
 typedef FieldOf<M> = Field<M, Object?>;
 
-/// List of all field descriptors for model [T] in the order of constructor parameters.
+/// List of all field descriptors for a model, in the order of the
+/// constructor parameters they feed.
 ///
-/// This order is critical for [SerializableHelpers.fromJson],
-/// which passes values as positional arguments.
-typedef ListFieldOf<T> = List<Field<T, Object?>>;
+/// This order is critical for [SerializableHelpers.fromJson], which
+/// passes values as positional arguments — see [Field.readFrom] for the
+/// alternative, per-field, `Function.apply`-free path, which has no
+/// order requirement of its own (each call names its own field).
+///
+/// Deliberately *not* generic over the model type `M`: nothing that
+/// actually consumes a `ListFieldOf` — [SerializableHelpers.fromJson],
+/// `Serializable.toJson()` — needs every element to share one exact `M`.
+/// Each [Field] already carries (and enforces) its own `M` internally,
+/// for its own `getter`'s parameter type and for the `modelType` on any
+/// error it throws; a field built via `Schema<M>.field` or
+/// `'key'.field<M, R>()` keeps that `M` even once it's sitting in a
+/// `ListFieldOf`, exactly as before. What's no longer required is for
+/// *every* field in the list to share the *same* `M` — which is what let
+/// the top-level `field<R>(jsonKey)` convenience (`extension.dart`,
+/// `Field<Object?, R>`) sit in the same list as `Schema`-declared fields.
+typedef ListFieldOf = List<Field<Object?, Object?>>;
 
 /// Field values for [Equatable.props].
 typedef Props = List<Object?>;

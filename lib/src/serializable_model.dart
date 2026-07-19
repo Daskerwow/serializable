@@ -1,8 +1,8 @@
 // =============================================================================
 // serializable_model.dart
 //
-// Serialization core: model interface, Serializable mixin, and
-// SerializableHelpers engine.
+// Serialization core: model interface, the Serializable/PropsFromGetters
+// mixins, and the SerializableHelpers engine.
 //
 // ─── Fixed Issues ────────────────────────────────────────────────────
 //
@@ -41,11 +41,44 @@
 //      logic and belongs on the domain entity, written by hand — see
 //      model_type.dart's header for the full reasoning, and the README's
 //      "Writing your own copyWith" section for a worked example.
+//
+//   6. `fromJson`'s per-field work (read → parse → null-check) moved to
+//      `Field.readFrom` (field.dart) — `fromJson` now just calls it once
+//      per field and passes the results to `Function.apply`, instead of
+//      keeping its own copy of that logic. This means the exact same
+//      read-and-validate step is also available *without* `Function.apply`,
+//      by calling `someField.readFrom(json)` directly as a constructor
+//      argument — see the README's "Fast, Function.apply-free
+//      deserialization" section. Nothing observable changes for existing
+//      `fromJson`/`ModelType.call` callers: same errors, same
+//      modelType/jsonKey/path/rawValue on every one of them.
+//
+//   7. **`Serializable<M>` no longer provides `props`.** It used to
+//      contain both `toJson()` and a getter-derived default `props` —
+//      correct in isolation, but a *latent bug* the moment `Serializable`
+//      was mixed onto a class hierarchy that already had a *concrete*
+//      `props` somewhere below it (e.g. `class Base extends Equatable {
+//      Props get props => [...]; } class Model extends Base with
+//      Serializable<Model> {}`). Dart's mixin linearization puts a mixin
+//      *after* the class(es) it's applied on top of, so `Serializable`'s
+//      `props` silently *shadowed* `Base`'s — every `Model` would use the
+//      getter-derived default (throwing `StateError`, since none of its
+//      fields have a `getter`) instead of the perfectly good `props`
+//      `Base` already provided, with no compile error to catch it.
+//      `props` is now the sole responsibility of [PropsFromGetters] — an
+//      **opt-in** second mixin for models that specifically want the
+//      getter-derived default. `Serializable` alone only ever provides
+//      `toJson()`, and never competes with a `props` implementation
+//      inherited from anywhere else. `ListFieldOf` also dropped its type
+//      parameter as part of this pass — see its doc comment in
+//      types/types.dart for why the list itself never actually needed to
+//      pin down one exact model type for every field in it.
 // =============================================================================
 
 import 'package:equatable/equatable.dart';
 
 import 'errors.dart';
+import 'types/recording.dart';
 import 'types/types.dart';
 
 // =============================================================================
@@ -59,8 +92,10 @@ import 'types/types.dart';
 /// standard `Equatable` list, and it's what makes [toJson] (and
 /// `==`/`hashCode`, via `Equatable`) correct for *any* instance, not just
 /// ones built via `fromJson`. It can either be written by hand (as in
-/// plain `Equatable` usage) or derived automatically from `getter:`
-/// closures on each field — see [Serializable] for both options.
+/// plain `Equatable` usage, or inherited from a plain-`Equatable` base
+/// class — see the README's "Fast, Function.apply-free deserialization"
+/// section) or derived automatically from `getter:` closures on each
+/// field via the separate, opt-in [PropsFromGetters] mixin.
 ///
 /// ### Field Requirements ([fields] and [props])
 /// [fields] must list a descriptor for every model field, and [props] must
@@ -77,15 +112,19 @@ import 'types/types.dart';
 /// short of an actual getter (or the model author getting `props` right)
 /// can tell two same-typed values apart.
 abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
-  /// All field descriptors, in constructor-parameter order.
+  /// All field descriptors, in constructor-parameter order — required
+  /// only by [SerializableHelpers.fromJson]'s `Function.apply` path.
+  /// Calling [Field.readFrom] directly, field by field, has no order
+  /// requirement of its own, but `fields` is still needed for `toJson()`
+  /// either way.
   ///
-  /// Declare as `static final` and override via a getter:
+  /// Declare as `static final` and expose via a getter:
   /// ```dart
-  /// static final ListFieldOf<User> _fields = [...];
+  /// static final _fields = <Field<Object?, Object?>>[...];
   /// @override
-  /// ListFieldOf<User> get fields => _fields;
+  /// ListFieldOf get fields => _fields;
   /// ```
-  ListFieldOf<M> get fields;
+  ListFieldOf get fields;
 
   /// Serializes the instance into a JSON-compatible Map.
   Json toJson();
@@ -96,41 +135,46 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
   /// you would for any `Equatable` class, referencing the model's own
   /// properties directly (e.g. `[id, name, address]`) — no JSON keys or
   /// strings of any kind belong here, only the values themselves.
-  /// [Serializable] builds both `toJson()` and `Equatable`'s
+  /// [Serializable] builds `toJson()` from it; `Equatable` builds
   /// `==`/`hashCode` from it.
   Props get props;
 }
 
 // =============================================================================
-// Serializable — mixin with automatic implementation
+// Serializable — mixin providing toJson()
 // =============================================================================
 
 /// Provides an automatic implementation of [toJson], built from [fields]
 /// and [props].
 ///
-/// [props] itself has two ways to be satisfied:
+/// This mixin does **not** provide `props` — that's `Equatable`'s own
+/// abstract member, and every model still has to satisfy it somehow, same
+/// as with plain `Equatable`:
 ///
-///   1. **Explicit** (original approach) — declare it yourself, exactly as
-///      in plain `Equatable` usage: `Props get props => [id, name, address];`.
-///      Always works, no extra setup on the fields.
-///   2. **Derived** — give every field in the [Schema] a `getter:`
-///      (`field<int>('user_id', getter: (m) => m.id)`), and don't override
-///      `props` at all. This mixin's default implementation then builds
-///      `props` from [fields] + those getters. One fewer hand-maintained
-///      list that has to stay in the same order as the constructor.
+///   1. **Declare it yourself** — exactly as in plain `Equatable` usage:
+///      `Props get props => [id, name, address];`. Always works.
+///   2. **Inherit it** from a plain, non-`Serializable` base class that
+///      already declares it — see the README's "Fast, Function.apply-free
+///      deserialization" section for why splitting a model into a plain
+///      domain class plus a thin `Serializable` subclass is a good fit
+///      for this.
+///   3. **Derive it from `getter:`s** — mix in [PropsFromGetters] as
+///      well: `with Serializable<M>, PropsFromGetters<M>`. Give every
+///      field in the [Schema] a `getter:` (`field<int>('user_id', getter:
+///      (m) => m.id)`) and skip declaring `props` entirely.
 ///
-/// Pick whichever fits — a model can even mix getter-equipped and
-/// getter-less fields as long as it still overrides `props` itself in that
-/// case (the derived default requires *every* field to have a getter, and
-/// throws a clear [StateError] otherwise rather than silently dropping
-/// fields).
+/// Options 1 and 2 need nothing from this mixin beyond `toJson()` itself.
+/// Option 3 needs [PropsFromGetters] *in addition to* this mixin — see its
+/// own doc comment for why that's a separate mixin rather than bundled in
+/// here.
 ///
 /// ### Full Model Example (recommended style: Schema + ModelType)
 ///
 /// See the package README for the complete picture; the shape of a single
-/// model is:
+/// model, using option 3 above, is:
 /// ```dart
-/// class User extends Equatable with Serializable<User> {
+/// class User extends Equatable
+///     with Serializable<User>, PropsFromGetters<User> {
 ///   final int id;
 ///   final String name;
 ///   final String? address;
@@ -140,10 +184,10 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
 ///   static final $ = ModelType<User>(User.new, UserSchema());
 ///
 ///   @override
-///   ListFieldOf<User> get fields => $.schema.all;
+///   ListFieldOf get fields => $.schema.all;
 ///
 ///   // No `props` override needed here — every field below has a
-///   // `getter:`, so Serializable's default derives it for you.
+///   // `getter:`, so PropsFromGetters derives it for you.
 ///
 ///   factory User.fromJson(Json json) => $.call(json);
 ///
@@ -157,30 +201,105 @@ abstract interface class SerializableModelI<M extends SerializableModelI<M>> {
 ///   late final address = field<String?>('user_address', getter: (m) => m.address);
 ///
 ///   @override
-///   ListFieldOf<User> get all => [id, name, address];
+///   late final all = [id, name, address];
 /// }
 /// ```
 mixin Serializable<M extends SerializableModelI<M>> on Equatable
     implements SerializableModelI<M> {
   @override
-  Json toJson() => SerializableHelpers._buildJson<M>(fields, props);
+  Json toJson() => SerializableHelpers._buildJson(fields, props);
+}
 
-  /// Default `props`, built from each field's `getter` (see
-  /// `Schema.field(..., getter: ...)`).
-  ///
-  /// This is what lets a model skip declaring `props` by hand entirely —
-  /// one less place where the field order has to be kept in sync with the
-  /// constructor and with `Schema.all`. A model is still free to override
-  /// `props` itself (the class body always wins over this mixin default);
-  /// do that if some fields don't have a `getter`, or if you simply prefer
-  /// the explicit list.
-  ///
-  /// Throws [StateError] — clearly, and only when this default is
-  /// actually used — if any field in [fields] has no `getter`, rather than
-  /// silently producing a `props` list with holes in it.
+// =============================================================================
+// PropsFromGetters — opt-in mixin deriving props from Field getters
+// =============================================================================
+
+/// Opt-in `props` default, built from each field's `getter` (see
+/// `Schema.field(..., getter: ...)` / `Schema.field(..., getter: ...)`).
+///
+/// Mix this in *alongside* [Serializable] — `with Serializable<M>,
+/// PropsFromGetters<M>` — on a model where *every* field has a `getter:`,
+/// to skip declaring `props` by hand entirely.
+///
+/// Deliberately a **separate** mixin from [Serializable], not bundled
+/// into it: a mixin's members take precedence over whatever the class(es)
+/// it's applied on top of already declared (Dart's usual linearization
+/// rules), so a `props` default living inside [Serializable] would
+/// silently *shadow* a perfectly good `props` inherited from a plain,
+/// non-`Serializable` base class — exactly the bug described in this
+/// file's header (fixed-issue #7). Requiring an explicit, separate
+/// `PropsFromGetters<M>` opt-in means a model only gets the getter-derived
+/// default when it actually asks for it.
+///
+/// Throws [StateError] — clearly, and only when actually invoked — if any
+/// field in [SerializableModelI.fields] has no `getter`, rather than
+/// silently producing a `props` list with holes in it.
+mixin PropsFromGetters<M extends SerializableModelI<M>>
+    implements SerializableModelI<M> {
   @override
-  Props get props =>
-      SerializableHelpers._propsFromGetters<M>(fields, this as M);
+  Props get props => SerializableHelpers._propsFromGetters<M>(
+    fields,
+    this as M,
+  );
+}
+
+// =============================================================================
+// RecordedFields — opt-in mixin capturing fields from field(...) calls
+// =============================================================================
+
+/// Opt-in `fields` default, captured automatically from the `field(...)`
+/// calls made while this instance was constructed — no separate `fields`
+/// list, `Schema`, or `ModelType` needed anywhere.
+///
+/// Mix this in *alongside* [Serializable] — `with Serializable<M>,
+/// RecordedFields<M>` — on a model whose real constructor is only ever
+/// invoked from inside [recordFields] (typically from `fromJson`):
+/// ```dart
+/// class UserModel extends User with Serializable<UserModel>, RecordedFields<UserModel> {
+///   // Private — the only way in is recordFields(...), below. Nothing
+///   // else can accidentally construct a UserModel with no fields
+///   // recorded for it.
+///   UserModel._({required super.id, required super.name, super.email});
+///
+///   factory UserModel.fromJson(Json json) => recordFields(() => UserModel._(
+///     id: field<int>('user_id').readFrom(json),
+///     name: field<String>('full_name').readFrom(json),
+///     email: field<String?>('email_address').readFrom(json),
+///   ));
+/// }
+/// ```
+/// Every `field(...)` call above — there's exactly one for each field,
+/// the same one `.readFrom(json)` is called on — is what `fields` is
+/// built from; nothing about it is declared a second time anywhere.
+///
+/// ### Why the real constructor needs to be private
+///
+/// [captureRecordedFields] — what this mixin calls — has to run *eagerly*,
+/// as a plain field initializer, not `late`: `late` only runs on first
+/// access, and `fields`/`toJson()` are almost always accessed well after
+/// construction finishes, by which point [recordFields]'s frame is long
+/// gone. Eager capture is what makes this correct instead of merely
+/// working by coincidence — but it also means it runs for *every*
+/// construction, including one that didn't go through [recordFields] at
+/// all, e.g. `UserModel(id: 1, name: 'Ada')` called directly. There's no
+/// frame to capture in that case, and [captureRecordedFields] throws a
+/// clear [StateError] rather than silently producing an empty or stale
+/// `fields`.
+///
+/// A private constructor turns that mistake into a compile error instead
+/// of a runtime one — nothing outside the file declaring `UserModel` can
+/// call `UserModel._(...)` directly, so the only path in really is
+/// `fromJson` (or any other factory that also wraps its call in
+/// [recordFields]). If a model genuinely needs to be built from values
+/// already in hand rather than from JSON — not from a factory at all —
+/// don't use [RecordedFields] for it; declare `fields` explicitly
+/// instead (see the README's "Fast, `Function.apply`-free
+/// deserialization" section for that style, and for the full reasoning
+/// behind this one).
+mixin RecordedFields<M extends SerializableModelI<M>>
+    implements SerializableModelI<M> {
+  @override
+  final ListFieldOf fields = captureRecordedFields(M);
 }
 
 // =============================================================================
@@ -201,11 +320,14 @@ final class SerializableHelpers {
   /// Deserializes [json] into model [R].
   ///
   /// ### Algorithm
-  /// 1. For each field from [fields]:
-  ///    a. Extracts the value by path `[nesting..., jsonKey]` via [_readPath].
-  ///    b. Applies `field.parser(raw)`.
-  ///    c. If the result is `null` and the field is not nullable — throws [RequiredFieldError].
-  /// 2. Passes all values as POSITIONAL arguments to [factory] via [Function.apply].
+  /// 1. For each field from [fields], [Field.readFrom] reads the value by
+  ///    path (`[nesting..., jsonKey]`, supporting nested keys via `at()`),
+  ///    parses it, and — if the result is `null` and the field isn't
+  ///    [Field.nullable] — throws [RequiredFieldError]. See its doc comment
+  ///    in field.dart for the full per-field contract; this method no
+  ///    longer duplicates it.
+  /// 2. Passes all values as POSITIONAL arguments to [factory] via
+  ///    [Function.apply].
   ///
   /// ### Important: positional constructor call
   /// [Function.apply(factory, args)] passes arguments positionally.
@@ -217,54 +339,23 @@ final class SerializableHelpers {
   /// static User fromJson(Map<String, Object?> json) =>
   ///     SerializableHelpers.fromJson(json, _fields, User.new);
   /// ```
+  ///
+  /// Prefer this when you'd rather not hand-write `fromJson` field by
+  /// field — it works for any model, with zero extra code beyond the
+  /// `Schema`. On a genuine hot path, calling [Field.readFrom] directly,
+  /// once per field, as a literal argument to the model's own constructor
+  /// avoids `Function.apply` (and the dynamic-call overhead that comes with
+  /// it) entirely — see the README's "Fast, Function.apply-free
+  /// deserialization" section.
   static R fromJson<R extends SerializableModelI<R>>(
     Json json,
-    ListFieldOf<R> fields,
+    ListFieldOf fields,
     Function factory,
   ) {
-    final args = <Object?>[];
-
-    for (final f in fields) {
-      // Read the value by path (supports nested keys via at()).
-      final raw = _readPath(json, f.nesting, f.jsonKey);
-      Object? value;
-
-      try {
-        value = f.parser(raw);
-      } on SerializationError {
-        // Typed errors are rethrown without wrapping — they already carry
-        // the full context (modelType, fieldName, path).
-        rethrow;
-      } catch (e, st) {
-        // Unexpected exceptions are wrapped in SerializationError with context.
-        Error.throwWithStackTrace(
-          SerializationError(
-            modelType: R,
-            jsonKey: f.jsonKey,
-            path: f.path,
-            rawValue: raw,
-            cause: e,
-          ),
-          st,
-        );
-      }
-
-      // ── Null guard (the only place where required fields are checked) ────────
-      //
-      // Cases:
-      //   value == null && !nullable → RequiredFieldError
-      //   value == null &&  nullable → acceptable, null is passed to the constructor
-      if (value == null && !f.nullable) {
-        throw RequiredFieldError(
-          modelType: R,
-          jsonKey: f.jsonKey,
-          path: f.path,
-          rawValue: raw,
-        );
-      }
-
-      args.add(value);
-    }
+    // Every field knows how to read and validate itself — see
+    // Field.readFrom. All that's left here is collecting the results, in
+    // order, and handing them to the constructor.
+    final args = [for (final f in fields) f.readFrom(json)];
 
     // Call the constructor with positional arguments.
     try {
@@ -298,8 +389,8 @@ final class SerializableHelpers {
   /// field's type parameter down to the list's own `Object?` element
   /// type rather than flagging that the getter and parser disagree, so
   /// the mismatch stays invisible until the constructor call it feeds.
-  static String _constructorFailureMessage<R>(
-    ListFieldOf<R> fields,
+  static String _constructorFailureMessage(
+    ListFieldOf fields,
     List<Object?> args,
   ) {
     final buf = StringBuffer(
@@ -321,21 +412,29 @@ final class SerializableHelpers {
   }
 
   // ===========================================================================
-  // props (internal) — backs Serializable's default `props` implementation
+  // props (internal) — backs PropsFromGetters
   // ===========================================================================
 
   /// Builds a `props` list by calling each field's `getter` against
   /// [instance], in [fields] order.
-  static Props _propsFromGetters<M>(ListFieldOf<M> fields, M instance) {
+  static Props _propsFromGetters<M>(ListFieldOf fields, M instance) {
     final result = <Object?>[];
     for (final f in fields) {
       if (!f.hasGetter) {
         throw StateError(
-          'Serializable.props: field "${f.jsonKey}" on $M has no getter. '
+          'PropsFromGetters: field "${f.jsonKey}" on $M has no getter. '
           'Either pass getter: (m) => m.yourProperty to every field in the '
-          'Schema, or override `props` manually on $M as before.',
+          'Schema, or drop PropsFromGetters and override `props` manually '
+          'on $M instead.',
         );
       }
+      // `f.readErased` expects the field's own `M`; through the
+      // `Object?`-erased `ListFieldOf` reference, that's checked at
+      // runtime (via the field's *reified* generic parameters) rather
+      // than statically — sound as long as every field in `fields`
+      // genuinely belongs to this model, which is the same invariant
+      // `fields`/`props` already had to uphold before `ListFieldOf`
+      // dropped its own type parameter (see types/types.dart).
       result.add(f.readErased(instance));
     }
     return result;
@@ -367,7 +466,7 @@ final class SerializableHelpers {
   /// silently writing wrong data for exactly the fields that don't crash.
   /// Checking unconditionally costs one cheap `is` check per field and
   /// closes that gap.
-  static Json _buildJson<M>(ListFieldOf<M> fields, Props props) {
+  static Json _buildJson(ListFieldOf fields, Props props) {
     if (fields.length != props.length) {
       throw StateError(
         'Serializable.toJson(): fields has ${fields.length} entries but '
@@ -446,36 +545,9 @@ final class SerializableHelpers {
   };
 
   // ===========================================================================
-  // Path helpers
+  // Path helpers (write side — the read side, readJsonPath, lives in
+  // types/json_path.dart and is shared with Field.readFrom)
   // ===========================================================================
-
-  /// Reads a value from [json] by the composite path `[...nesting, key]`.
-  ///
-  /// Each [nesting] step is a key of a nested Map.
-  /// If the value is not a Map at any step — returns null (field is missing).
-  ///
-  /// Example: `nesting=['meta', 'stats']`, `key='count'`
-  ///   → reads `json['meta']['stats']['count']`
-  ///
-  /// Descends via [Map.cast] rather than [Map.from]: [Map.cast] returns an
-  /// O(1) typed *view* over the same underlying map, not a copy. Every
-  /// field sharing a nesting prefix (e.g. six fields all declared via
-  /// `at('statistics', ...)`) calls this independently from the root —
-  /// with a real copy at each level, that's an O(map size) allocation
-  /// paid again per field per level, for a value that's discarded after
-  /// reading exactly one key out of it. A view has none of that cost:
-  /// [current[step]] on a `CastMap` only checks the *type of the one
-  /// value actually read*, never touches or duplicates the rest of the
-  /// map's entries.
-  static Object? _readPath(Json json, List<String> nesting, String key) {
-    Json current = json;
-    for (final step in nesting) {
-      final next = current[step];
-      if (next is! Map) return null;
-      current = next.cast<String, Object?>();
-    }
-    return current[key];
-  }
 
   /// Writes [value] to [map] by the composite path [keys].
   ///

@@ -9,25 +9,12 @@ enum AccessLevel { read, write, execute }
 enum Grade { a, b, c }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Sensor
+// Sensor — single class, RecordedFields, hand-written props
 // ══════════════════════════════════════════════════════════════════════════════
 
-/// A single environmental sensor reading.
-///
-/// This model deliberately has *four* `bool` fields and *two* fields of the
-/// same `Grade` enum — and the sample JSON in `main()` deliberately gives
-/// every one of those `bool`s the same value, and both `Grade` fields the
-/// same member. That's not sloppy modeling; it's here on purpose, to prove
-/// something real: `Schema.set((m) => m.field, value)` still has to resolve
-/// to the *exact* field the selector reads, even when several same-typed
-/// fields currently hold the exact same value. See the `$.set(...)` calls
-/// in `main()` for the actual proof — and `ModelBinder`'s doc comments in
-/// the package itself for how the disambiguation is done (a synthetic probe
-/// instance, seeded so same-typed fields provably differ, plus an
-/// exhaustive isolating-probe fallback for finite-domain types like `bool`
-/// and `Enum`, where a single seed can't always tell them apart).
-class Sensor extends Equatable with Serializable<Sensor> {
-  const Sensor(
+class Sensor extends Equatable
+    with Serializable<Sensor>, RecordedFields<Sensor> {
+  Sensor._(
     this.uid,
     this.temperature,
     this.humidity,
@@ -51,51 +38,57 @@ class Sensor extends Equatable with Serializable<Sensor> {
   final Grade secondaryGrade;
   final List<DateTime> history;
 
-  static final $ = ModelType(Sensor.new, SensorSchema());
-
   @override
-  ListFieldOf<Sensor> get fields => $.schema.all;
-
-  // No `props` override here: every field below carries a `getter:`, so
-  // `Serializable`'s default implementation derives `props` from them —
-  // and, as a side effect, this is also what makes `copyWith` below take
-  // the allocation-free direct-construction path instead of a JSON
-  // round-trip. See `Terminal` further down for the other style.
-
-  factory Sensor.fromJson(Json json) => $.call(json);
-}
-
-final class SensorSchema extends Schema<Sensor> {
-  @override
-  ListFieldOf<Sensor> get all => [
-    'sensor_uid'.field(getter: (m) => m.uid),
-    'temperature'.field(getter: (m) => m.temperature),
-    'humidity'.field(getter: (m) => m.humidity),
-    'is_active'.field(getter: (m) => m.isActive),
-    'is_calibrated'.field(getter: (m) => m.isCalibrated),
-    'is_faulty'.field(getter: (m) => m.isFaulty),
-    'is_offline'.field(getter: (m) => m.isOffline),
-    'primary_grade'.field(
-      getter: (m) => m.primaryGrade,
-      parser: enumOrFirst(Grade.values),
-    ),
-    'secondary_grade'.field(
-      getter: (m) => m.secondaryGrade,
-      parser: enumOrFirst(Grade.values),
-    ),
-    'history_logs'.field(
-      getter: (m) => m.history,
-      parser: listOf(dateTimeOrEpoch),
-    ),
+  List<Object?> get props => [
+    uid,
+    temperature,
+    humidity,
+    isActive,
+    isCalibrated,
+    isFaulty,
+    isOffline,
+    primaryGrade,
+    secondaryGrade,
+    history,
   ];
+
+  factory Sensor.fromJson(Json json) => recordFields(
+    () => Sensor._(
+      field<String>('sensor_uid').readFrom(json),
+      field<double>('temperature').readFrom(json),
+      field<double>('humidity').readFrom(json),
+      field<bool>('is_active').readFrom(json),
+      field<bool>('is_calibrated').readFrom(json),
+      field<bool>('is_faulty').readFrom(json),
+      field<bool>('is_offline').readFrom(json),
+      field<Grade>(
+        'primary_grade',
+        parser: enumOrFirst(Grade.values),
+      ).readFrom(json),
+      field<Grade>(
+        'secondary_grade',
+        parser: enumOrFirst(Grade.values),
+      ).readFrom(json),
+      field<List<DateTime>>(
+        'history_logs',
+        parser: listOf(dateTimeOrEpoch),
+      ).readFrom(json),
+    ),
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Terminal
+// Terminal — nested Sensor list + an Enum-keyed Map serializer
 // ══════════════════════════════════════════════════════════════════════════════
 
-class Terminal extends Equatable with Serializable<Terminal> {
-  const Terminal(this.id, this.title, this.status, this.sensors, this.tokens);
+class TerminalData extends Equatable {
+  TerminalData({
+    required this.id,
+    required this.title,
+    required this.status,
+    required this.sensors,
+    required this.tokens,
+  });
 
   final int id;
   final String title;
@@ -103,32 +96,70 @@ class Terminal extends Equatable with Serializable<Terminal> {
   final List<Sensor> sensors;
   final Map<AccessLevel, String> tokens;
 
-  static final $ = ModelType(Terminal.new, TerminalSchema());
-
   @override
-  ListFieldOf<Terminal> get fields => $.schema.all;
-  factory Terminal.fromJson(Json json) => $.call(json);
+  List<Object?> get props => [id, title, status, sensors, tokens];
 }
 
-final class TerminalSchema extends Schema<Terminal> {
+class Terminal extends TerminalData
+    with Serializable<Terminal>, RecordedFields<Terminal> {
+  Terminal({
+    required super.id,
+    required super.title,
+    required super.status,
+    required super.sensors,
+    required super.tokens,
+  });
+
+  factory Terminal.fromJson(Json json) => recordFields(
+    () => Terminal(
+      id: field<int>('t_id').readFrom(json),
+      title: field<String>(
+        'display_name',
+        parser: stringOrDefault('Unnamed'),
+      ).readFrom(json),
+      status: field<DeviceStatus>(
+        'device_status',
+        parser: enumOrFirst(DeviceStatus.values),
+      ).readFrom(json),
+      sensors: field<List<Sensor>>(
+        'attached_sensors',
+        parser: listOf(modelOf(Sensor.fromJson)),
+      ).readFrom(json),
+      tokens: field<Map<AccessLevel, String>>(
+        'access_keys',
+        parser: mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty),
+        serializer: (map) => {for (final e in map.entries) e.key.name: e.value},
+      ).readFrom(json),
+    ),
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// User / UserModel — domain object + a thin JSON-capable subclass
+// ══════════════════════════════════════════════════════════════════════════════
+
+class User extends Equatable {
+  const User({required this.id, required this.name, this.email});
+
+  final int id;
+  final String name;
+  final String? email;
+
   @override
-  ListFieldOf<Terminal> get all => [
-    field<int>('t_id').get((m) => m.id),
-    field<String>(
-      'display_name',
-    ).get((m) => m.title).parse(stringOrDefault('Unnamed')),
-    field<DeviceStatus>('device_status')
-        .get((m) => m.status)
-        .parse(enumOrFirst(DeviceStatus.values))
-        .serialize(enumToJson),
-    field<List<Sensor>>(
-      'attached_sensors',
-    ).get((m) => m.sensors).parse(listOf(modelOf(Sensor.fromJson))),
-    field<Map<AccessLevel, String>>('access_keys')
-        .get((m) => m.tokens)
-        .parse(mapOf(enumOrFirst(AccessLevel.values), stringOrEmpty))
-        .serialize((map) => {for (final e in map.entries) e.key.name: e.value}),
-  ];
+  List<Object?> get props => [id, name, email];
+}
+
+class UserModel extends User
+    with Serializable<UserModel>, RecordedFields<UserModel> {
+  UserModel._({required super.id, required super.name, super.email});
+
+  factory UserModel.fromJson(Json json) => recordFields(
+    () => UserModel._(
+      id: field<int>('user_id').readFrom(json),
+      name: field<String>('full_name').readFrom(json),
+      email: field<String?>('email_address').readFrom(json),
+    ),
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -163,14 +194,23 @@ void main() {
         'is_offline': false,
         'primary_grade': 'a',
         'secondary_grade': 'a',
-        'history_logs': <String>[],
+        'history_logs': [],
       },
     ],
     'access_keys': {'read': 'key_r', 'write': 'key_w'},
   };
 
-  final terminal = Terminal.fromJson(Json.of(raw));
+  final terminal = Terminal.fromJson(raw);
   print(
     'id: ${terminal.id}, title: ${terminal.title}, status: ${terminal.status}',
   );
+  print('terminal.toJson(): ${terminal.toJson()}');
+  print('round-trips: ${terminal == Terminal.fromJson(terminal.toJson())}');
+
+  final user = UserModel.fromJson({
+    'user_id': 7,
+    'full_name': 'Ada',
+    'email_address': null,
+  });
+  print('user.toJson(): ${user.toJson()}');
 }

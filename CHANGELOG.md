@@ -1,5 +1,235 @@
 # Changelog
 
+## 6.1.0 — `RecordedFields`: `fields` captured from `fromJson`, not declared separately
+
+The one piece `6.0.0`'s Schema-free `field()` still needed a second,
+explicit declaration for — `fields`, for `toJson()` — no longer does,
+for models that opt in.
+
+### Added
+
+- `RecordedFields<M extends SerializableModelI<M>>` — opt-in mixin
+  providing `fields`, captured automatically from the `field(...)` calls
+  made while an instance is constructed. Combine with `Serializable<M>`:
+  `with Serializable<M>, RecordedFields<M>`. The model's real constructor
+  must be built only through `recordFields(() => ...)` (typically wrapped
+  around the body of `fromJson`) — see the README's rewritten "Fast,
+  `Function.apply`-free deserialization" section for the full pattern,
+  the reasoning behind the eager-capture requirement, and why that means
+  the real constructor should be private.
+- `recordFields<M>(M Function() build)` — runs `build`, capturing every
+  `field(...)` call made while evaluating it into a fresh frame that
+  `RecordedFields` then reads. Correctly nests for models embedded inside
+  other recorded models (e.g. via `modelOf`).
+- `registerField`, `captureRecordedFields` — the two smaller pieces
+  `field(...)`/`RecordedFields` are each built from; not usually called
+  directly, but exported for anyone building their own field-declaration
+  helper on top of this package.
+
+### Fixed (documentation)
+
+- The README's `field()`-based examples from `6.0.0` still declared a
+  separate `static final _fields = [...]` list, duplicating the exact
+  `field(...)` calls already made in `fromJson`. That style is kept —
+  it's the right choice for a model that wants to keep a public raw
+  constructor — but `RecordedFields` (above) is now the lead example for
+  models that don't need one.
+
+### Compatibility
+
+Fully additive: nothing about `Field`, `Schema`, `ModelType`,
+`Serializable`, `PropsFromGetters`, or existing `field(...)` call sites
+changed. `registerField` is called by `buildField` for every `Field` it
+ever builds, but is a no-op — zero cost, zero behavior change — unless
+`recordFields` is actually active, which no existing code triggers.
+
+## 6.0.0 — Schema-free deserialization: a model-agnostic `field()`, and a real `Serializable`/`props` bug fix
+
+Two things prompted this release, together: making `Field.readFrom`
+usable with **zero** per-model setup (no `Schema`, no per-class helper
+method), and a genuine correctness bug that surfaced while designing the
+model split that makes that possible.
+
+### The bug
+
+`Serializable<M>` used to provide *both* `toJson()` and a getter-derived
+default `props`. That's fine in isolation, but unsound the moment
+`Serializable` is mixed onto a class hierarchy that already has a
+*concrete* `props` implementation somewhere below it — e.g. a plain
+domain class `User` with a hand-written `props`, and a thin
+`UserModel extends User with Serializable<UserModel>` on top, adding JSON
+support. Dart's mixin linearization puts `Serializable` *after* `User` in
+`UserModel`'s effective hierarchy, so `Serializable`'s `props` **silently
+shadowed** `User`'s — every `UserModel` used the getter-derived default
+instead of `User`'s real `props`, throwing `StateError` the moment
+anything touched `.props` (`toJson()`, `==`, `hashCode`), since none of
+its fields have a `getter`. No compile error, no warning — just a runtime
+throw the first time it mattered.
+
+### The fix
+
+`props` is no longer `Serializable`'s to provide. It's split into two
+mixins:
+
+- `Serializable<M>` — `toJson()` only, same as always.
+- `PropsFromGetters<M>` — the getter-derived `props` default, now opt-in:
+  `with Serializable<M>, PropsFromGetters<M>`.
+
+A model that doesn't explicitly ask for `PropsFromGetters` gets exactly
+what plain `Equatable` usage always required: declare `props` yourself,
+or inherit it from somewhere that does. `Serializable` never competes
+with either option again.
+
+### What this unlocked
+
+With `props` handled by ordinary inheritance, `fields` (needed for
+`toJson()` regardless of how `fromJson` is implemented) became the last
+thing standing between a model and zero `Schema`/`ModelType` boilerplate.
+A new top-level `field<R>(jsonKey)` — no `M` to supply, unlike
+`Schema.field`/`'key'.field<M, R>()` — makes that genuinely `Schema`-free:
+
+```dart
+class User extends Equatable {
+  final int id;
+  final String name;
+  const User({required this.id, required this.name});
+  @override
+  List<Object?> get props => [id, name];
+}
+
+class UserModel extends User with Serializable<UserModel> {
+  const UserModel({required super.id, required super.name});
+
+  static final _fields = <Field<Object?, Object?>>[
+    field<int>('user_id'),
+    field<String>('full_name'),
+  ];
+
+  @override
+  ListFieldOf get fields => _fields;
+
+  factory UserModel.fromJson(Json json) => UserModel(
+    id: field<int>('user_id').readFrom(json),
+    name: field<String>('full_name').readFrom(json),
+  );
+}
+```
+
+See the README's rewritten "Fast, `Function.apply`-free deserialization"
+section for the full pattern, including an honest answer to "why doesn't
+`field(...)` just collect `fields` for you too?" (short version: it would
+reintroduce the exact bug `4.0.0` already fixed once, for instances built
+without ever calling `fromJson`).
+
+### Breaking
+
+- **`Serializable<M>` no longer provides `props`.** Any model relying on
+  its old getter-derived default must add `PropsFromGetters<M>`:
+  `with Serializable<M>` → `with Serializable<M>, PropsFromGetters<M>`.
+  Models with an explicit, hand-written `props` override are unaffected.
+- **`ListFieldOf<T>` is now `ListFieldOf`, with no type parameter.**
+  Nothing that consumes a `ListFieldOf` — `SerializableHelpers.fromJson`,
+  `Serializable.toJson()` — ever actually needed every element to share
+  one exact model type; only individual `Field`s needed their own `M`
+  (for their `getter`'s parameter type, and for the `modelType` on any
+  error they throw), and they keep it regardless of how the list holding
+  them is typed. Update `ListFieldOf<User>` → `ListFieldOf` at every
+  `fields`/`Schema.all` override.
+- `SerializableModelI<M>.fields` and `Schema<M>.all` changed accordingly:
+  `ListFieldOf<M> get fields;` → `ListFieldOf get fields;` (same for
+  `all`).
+
+### Added
+
+- Top-level `field<R>(String jsonKey, {parser, serializer, nullable})` —
+  builds a `Field<Object?, R>`, usable anywhere with no `Schema` and no
+  model type in scope, including directly inside a hand-written `factory
+  Model.fromJson(...)`. The only cost versus a `Schema`/`'key'.field<M,
+  R>()`-declared field: errors it throws report `modelType: Object?`
+  instead of the real model name (everything else — `jsonKey`, `path`,
+  `rawValue` — is identical). Both kinds of field can sit in the same
+  `fields`/`ListFieldOf` list, mixed freely.
+- `PropsFromGetters<M extends SerializableModelI<M>>` — the getter-derived
+  `props` default `Serializable<M>` used to provide, now a separate,
+  explicit opt-in mixin. See "The fix" above for why.
+
+## 5.1.0 — `Field.readFrom`: per-field deserialization without `Function.apply`
+
+Every `Field<M, R>` now exposes `R readFrom(Json json)` — reads, parses,
+and null-checks exactly one field, statically typed, with none of
+`Function.apply`'s dynamic-call overhead or its loss of compile-time
+argument-type checking. `SerializableHelpers.fromJson` (and therefore
+`ModelType.call`) is unchanged in observable behavior — same errors, same
+`modelType`/`jsonKey`/`path`/`rawValue` on every one of them — but is now
+*implemented in terms of* `readFrom`, called once per field, instead of
+duplicating that logic inline.
+
+This is additive and fully backward compatible: nothing about `ModelType`,
+`Schema`, or `toJson()` changed, and no existing model needs to change.
+`ModelType.call`'s `Function.apply`-based path remains available and is
+still the right default when you'd rather not write `fromJson` by hand for
+every model. `readFrom` is for the hand-written, no-`Function.apply`
+alternative — see the README's new "Fast, `Function.apply`-free
+deserialization" section, including how it composes with Dart's
+(experimental, as of this writing) primary constructors.
+
+### Added
+
+- `Field<M, R>.readFrom(Json json)` — reads this field's raw value out of
+  `json` (honoring `nesting`/`at(...)`), parses it via `parser`, and
+  applies the same required-field check `fromJson` already did, throwing
+  `RequiredFieldError`/`TypeConversionError`/`SerializationError` with the
+  same context as before. Meant to be called once per field, directly as a
+  positional argument to a hand-written factory constructor:
+  ```dart
+  factory User.fromJson(Json json) => User(
+    id: field<int>('user_id').readFrom(json),
+    name: field<String>('full_name').readFrom(json),
+  );
+  ```
+- `readJsonPath(Json json, List<String> nesting, String key)` — the path
+  walk `readFrom` and `SerializableHelpers.fromJson` both now share,
+  extracted out of `serializable_model.dart`'s former private `_readPath`
+  into its own file (`types/json_path.dart`) so `field.dart` doesn't have
+  to import `serializable_model.dart` (or duplicate the walk) to use it.
+  Exported from the package root alongside `at`.
+
+### Changed
+
+- `SerializableHelpers.fromJson`'s per-field loop (read → parse → null
+  check → collect into `args`) is now just `[for (final f in fields)
+  f.readFrom(json)]` — that loop body moved to `Field.readFrom` itself,
+  so there's exactly one implementation of "read and validate one field"
+  for both the `Function.apply` path and the direct-call path to share,
+  instead of two copies that could silently drift apart.
+
+### Fixed
+
+- **The README's `readFrom` examples kept a `Schema` subclass (and, at
+  first, a `ModelType` too) around even though neither earns its keep
+  once you're calling `readFrom` yourself, field by field, by name.**
+  `Schema`/`ModelType` exist to give the `Function.apply` path a field
+  list to loop over blind, and to support `getter:`-derived `props`;
+  neither applies here. Replaced with the pattern the README now leads
+  with: a one-line, per-class, curried `static Field<M, R> field<R>(String
+  jsonKey, {...})` helper, called directly — `field<int>('user_id')
+  .readFrom(json)` — with `fields` built from a `static final` list of
+  the same calls. Also added a "Why doesn't `field(...)` just collect
+  `fields`/`props` for you?" section explaining, concretely — by pointing
+  at this file's own `4.0.0` entry — why that last step can't be
+  automated away without reintroducing the exact bug `4.0.0` fixed (a
+  model built by calling its constructor directly, bypassing `fromJson`
+  entirely, would get an empty/stale `fields`/`props` instead of a
+  `StateError` or correct output).
+- **`Schema.all` (and any hand-rolled `fields` getter reading it) was
+  shown as `get all => [...]`** throughout the README — a plain getter,
+  rebuilding the `List` on every access, including every `toJson()` call.
+  Every example now uses either `late final all = [...]` (on a `Schema`)
+  or a `static final` list read through a `get fields => _fields;`
+  one-liner (on a model using the flat pattern above), both computed
+  once. Purely a documentation fix — nothing in the library needed to
+  change.
+
 ## 5.0.0 — Remove `copyWith`, `Schema.set`, and `ModelBinder`; fix the `getter:` regression
 
 `copyWith` is no longer part of this library's public API. json_forge maps

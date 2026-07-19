@@ -48,11 +48,12 @@ abstract base class Schema<M> {
   /// only to override that default.
   /// [getter] is optional and lets this field read its own current value
   /// off a model instance (`getter: (m) => m.uid`). It has nothing to do
-  /// with parsing — it exists purely so [Serializable]'s default `props`
-  /// can be built from `Schema.all` alone, without a separately
-  /// hand-maintained `props` list. Skip it and keep overriding `props`
-  /// yourself if you prefer; the two styles can even be mixed per field,
-  /// though a model should pick one style consistently.
+  /// with parsing — it exists purely so the opt-in [PropsFromGetters]
+  /// mixin can build `props` from `Schema.all` alone, without a
+  /// separately hand-maintained `props` list. Skip it and keep declaring
+  /// `props` yourself (directly, or inherited from a plain base class) if
+  /// you prefer; the two styles can even be mixed per field, though a
+  /// model should pick one style consistently.
   Field<M, R> field<R>(
     String jsonKey, {
     R Function(M)? getter,
@@ -71,7 +72,7 @@ abstract base class Schema<M> {
   ///
   /// This must list every field in the same order as the model's
   /// constructor parameters — see [ModelType] for why.
-  ListFieldOf<M> get all;
+  ListFieldOf get all;
 }
 
 // =============================================================================

@@ -24,7 +24,8 @@
 ///
 /// `copyWith` is deliberately out of scope for this library — it maps JSON
 /// ⇄ model only. Write `copyWith` by hand on your domain entity; see
-/// model_type.dart's header for the reasoning.
+/// model_type.dart's header for the reasoning, and the README's "Writing
+/// your own copyWith" section for a worked example.
 library json_forge;
 
 export 'src/serializable_model.dart';

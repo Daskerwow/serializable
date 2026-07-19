@@ -5,9 +5,12 @@
 //   at('meta', at('stats', intOrZero))   // declares json['meta']['stats']
 //
 // ─── How this actually works ─────────────────────────────────────────────
-// The nested *traversal* happens in `SerializableHelpers._readPath`, which
+// The nested *traversal* happens in `readJsonPath` (json_path.dart), which
 // walks `Field.nesting` *before* the value ever reaches the field's parser —
 // by the time `child` runs, `v` is already the fully-resolved leaf value.
+// `readJsonPath` is called from both `Field.readFrom` and
+// `SerializableHelpers.fromJson` (the latter now via the former) — see
+// field.dart and serializable_model.dart.
 //
 // `at`'s only job is to *record* the nesting path so `Field.nesting` can be
 // populated correctly. It does this by stashing the path on the wrapper
@@ -15,7 +18,7 @@
 // extra state), and `nestingOf` (called from `FieldStringX.field`) reads it
 // back. The wrapper itself is a transparent passthrough to `child` — it does
 // NOT index into a Map itself, and shouldn't: that indexing already happened
-// in `_readPath`.
+// in `readJsonPath`.
 // =============================================================================
 
 import '../types.dart';

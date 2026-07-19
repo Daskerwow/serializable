@@ -107,6 +107,61 @@ extension FieldStringX on String {
   );
 }
 
+/// A bare, model-agnostic way to declare a field — `field<R>(jsonKey)`,
+/// with no `M` to supply at all (unlike [FieldStringX.field] /
+/// [Schema.field], both of which need or infer a concrete model type).
+///
+/// Every call is also registered into the current [recordFields] frame,
+/// if one is active — this is what lets [RecordedFields] build a model's
+/// `fields` from nothing but the `field(...)` calls its own `fromJson`
+/// already makes, with no separate `fields` list to keep in sync:
+/// ```dart
+/// factory UserModel.fromJson(Json json) => recordFields(() => UserModel._(
+///   id: field<int>('user_id').readFrom(json),
+///   name: field<String>('full_name').readFrom(json),
+/// ));
+/// ```
+/// See [RecordedFields]'s doc comment (serializable_model.dart) for the
+/// full pattern, including why the real constructor above is private.
+///
+/// Returns `Field<Object?, R>` — the same [Field], with the same
+/// [Field.readFrom]/[Field.parser]/[Field.nullable] behavior as any other,
+/// just with its `M` fixed to `Object?` instead of the real model type.
+/// The only thing that costs is error-message precision: a
+/// [RequiredFieldError]/[TypeConversionError] thrown by a field declared
+/// this way reports `modelType: Object?` rather than the model's real
+/// name, since there's no model type in scope here for it to report. If
+/// you want the real model name in error output — or a `getter:`, for
+/// [PropsFromGetters] — declare the field through [Schema.field] or
+/// [FieldStringX.field] (`'jsonKey'.field<M, R>(...)`) instead, both of
+/// which take an explicit or inferred `M` (and are registered into
+/// [recordFields] exactly the same way, if you want to mix styles).
+///
+/// Not using [RecordedFields]? `Field<Object?, R>` doesn't require every
+/// field in a `ListFieldOf` to share one exact model type (see that
+/// typedef's doc comment in types/types.dart), so fields declared this
+/// way sit in a hand-declared `fields` list just as well:
+/// ```dart
+/// static final _fields = <Field<Object?, Object?>>[
+///   field<int>('user_id'),
+///   field<String>('full_name'),
+/// ];
+///
+/// @override
+/// ListFieldOf get fields => _fields;
+/// ```
+Field<Object?, R> field<R>(
+  String jsonKey, {
+  R Function(Object?)? parser,
+  Object? Function(R)? serializer,
+  bool? nullable,
+}) => buildField<Object?, R>(
+  jsonKey: jsonKey,
+  parser: parser,
+  serializer: serializer,
+  nullable: nullable,
+);
+
 Field<M, R> buildField<M, R>({
   required String jsonKey,
   R Function(Object?)? parser,
@@ -122,7 +177,7 @@ Field<M, R> buildField<M, R>({
   // explicitly-passed `nullable:` always wins over this default.
   final resolvedNullable = nullable ?? (null is R);
 
-  return Field<M, R>(
+  final built = Field<M, R>(
     jsonKey: jsonKey,
     nesting: nesting,
     nullable: resolvedNullable,
@@ -158,6 +213,13 @@ Field<M, R> buildField<M, R>({
       );
     },
   );
+
+  // A no-op unless recordFields(...) is currently active — see
+  // types/recording.dart. This is what lets RecordedFields build a
+  // model's `fields` from nothing but the field(...) calls its own
+  // fromJson already makes.
+  registerField(built);
+  return built;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
