@@ -396,7 +396,7 @@ final class SerializableHelpers {
           // Use the type-erased wrapper — safe with an erased type.
           ? f.serializeErased(val)
           // Default smart serialization.
-          : _serialize(val);
+          : _serialize(val, modelType: M, path: f.jsonKey);
 
       // Write by the full path (account for nesting via at()).
       _writeDeep(result, [...f.nesting, f.jsonKey], serialized);
@@ -411,6 +411,14 @@ final class SerializableHelpers {
 
   /// Recursively serializes a Dart value into a JSON-compatible type.
   ///
+  /// [modelType] and [path] carry no data of their own — they exist purely
+  /// so that [UnserializableValueError] (thrown by the fallback case below)
+  /// can report exactly which model and which field — down to the specific
+  /// key or index inside a nested `Map`/`List` — produced a value this
+  /// serializer doesn't know how to handle, instead of failing anonymously
+  /// later inside whatever storage layer eventually tries to JSON-encode
+  /// it (e.g. sembast).
+  ///
   /// ### Mapping Table
   /// | Dart Type          | JSON Representation                 |
   /// |--------------------|---------------------------------------|
@@ -424,16 +432,31 @@ final class SerializableHelpers {
   /// | List / Set         | recursively serialized List           |
   /// | Map                | keys via `.toString()`, values recursively |
   /// | num / bool / String| unchanged                             |
-  static Object? _serialize(Object? v) => switch (v) {
+  /// | anything else       | throws [UnserializableValueError]     |
+  static Object? _serialize(
+    Object? v, {
+    required Type modelType,
+    required String path,
+  }) => switch (v) {
     null => null,
     // Models are serialized via their own toJson.
     final SerializableModelI m => m.toJson(),
-    // Collections — recursively.
-    final List l => l.map(_serialize).toList(growable: false),
-    final Set s => s.map(_serialize).toList(growable: false),
+    // Collections — recursively, with the path extended per element so a
+    // failure deep inside points at the exact index/key that caused it.
+    final List l => [
+      for (var i = 0; i < l.length; i++)
+        _serialize(l[i], modelType: modelType, path: '$path[$i]'),
+    ],
+    final Set s => [
+      for (final e in s) _serialize(e, modelType: modelType, path: '$path{}'),
+    ],
     final Map m => {
       for (final MapEntry(:key, :value) in m.entries)
-        key.toString(): _serialize(value),
+        key.toString(): _serialize(
+          value,
+          modelType: modelType,
+          path: "$path['${key.toString()}']",
+        ),
     },
     // Special types — into strings/numbers.
     final DateTime dt => dt.toIso8601String(),
@@ -442,7 +465,17 @@ final class SerializableHelpers {
     final BigInt b => b.toString(),
     final Enum e => e.name,
     // Primitives (int, double, String, bool) — unchanged.
-    _ => v,
+    final num n => n,
+    final String s => s,
+    final bool b => b,
+    // Anything else is not JSON-safe on its own — fail loudly, with full
+    // model/field context, instead of silently passing an unencodable
+    // object through to whatever writes the final JSON.
+    _ => throw UnserializableValueError(
+      modelType: modelType,
+      fieldPath: path,
+      value: v,
+    ),
   };
 
   // ===========================================================================

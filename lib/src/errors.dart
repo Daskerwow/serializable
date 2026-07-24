@@ -136,3 +136,42 @@ final class TypeConversionError extends SerializationError {
         '  actual   : $actualType';
   }
 }
+
+// =============================================================================
+
+/// Thrown from [SerializableHelpers._serialize] (the *toJson* / write
+/// direction — the mirror image of [TypeConversionError], which fires on
+/// the *fromJson* / read direction) when a field holds a value that isn't
+/// JSON-safe and has no custom `serializer` to handle it.
+///
+/// Unlike the other errors in this file, [path] here is not a fixed
+/// `Field.path` — it's built up during recursion through nested `Map`s and
+/// `List`s, so it can point past the field itself and into exactly which
+/// key or index inside it held the bad value (e.g.
+/// `"metadata['error']"` or `"items[2]['nested']"`).
+///
+/// Example output:
+/// ```
+/// SerializationError: [LogsModel.metadata['error']]
+///   message  : value is not JSON-serializable
+///   path     : metadata['error']
+///   raw value: EditableArguments (Instance of 'EditableArguments')
+/// ```
+final class UnserializableValueError extends SerializationError {
+  UnserializableValueError({
+    required super.modelType,
+    required String fieldPath,
+    required Object value,
+  }) : super(
+         jsonKey: fieldPath,
+         path: fieldPath,
+         rawValue: value,
+         message:
+             'value is not JSON-serializable — add a custom `serializer:` '
+             'for this field in its Schema, or make sure it only ever '
+             'holds JSON-safe values (num, String, bool, null, DateTime, '
+             'Duration, Uri, BigInt, Enum, List, Set, Map, or a '
+             'SerializableModelI). If only a text representation is '
+             'needed, call `.toString()` on the value before storing it.',
+       );
+}
